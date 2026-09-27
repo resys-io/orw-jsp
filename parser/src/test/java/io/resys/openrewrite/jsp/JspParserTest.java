@@ -1,0 +1,199 @@
+package io.resys.openrewrite.jsp;
+
+import org.junit.jupiter.api.Test;
+import org.openrewrite.test.RewriteTest;
+
+import static io.resys.openrewrite.jsp.Assertions.jsp;
+
+/**
+ * Round-trip (parse then print, expecting byte-for-byte identical output) tests covering the
+ * "standard syntax" constructs defined by the Jakarta Server Pages 4.0 specification.
+ */
+class JspParserTest implements RewriteTest {
+
+    @Test
+    void plainHtmlIsPreservedAsText() {
+        rewriteRun(
+                jsp(
+                        """
+                        <!DOCTYPE html>
+                        <html>
+                        <head><title>Hello</title></head>
+                        <body>
+                        <p>Just some HTML, no JSP here.</p>
+                        </body>
+                        </html>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void pageDirective() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="text/html;charset=UTF-8" language="java" %>
+                        <html></html>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void includeAndTaglibDirectives() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ include file="header.jsp" %>
+                        <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void jspComment() {
+        rewriteRun(
+                jsp(
+                        """
+                        <html>
+                        <%-- this whole block, including <% code %> looking things, is just a comment --%>
+                        </html>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void scriptletDeclarationAndExpression() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%! private int counter = 0; %>
+                        <%
+                            counter++;
+                            String name = request.getParameter("name");
+                        %>
+                        <p>Hello, <%= name %>! You are visitor #<%= counter %>.</p>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void scriptletWithEscapedPercentGt() {
+        rewriteRun(
+                jsp(
+                        """
+                        <% String s = "100%\\>"; %>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void expressionLanguageImmediateAndDeferred() {
+        rewriteRun(
+                jsp(
+                        """
+                        <p>${user.name}</p>
+                        <p>#{user.email}</p>
+                        <p>${empty list ? 'none' : list}</p>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void expressionLanguageWithNestedBracesAndStringLiterals() {
+        rewriteRun(
+                jsp(
+                        """
+                        <p>${myMap['a}b'].get('x{y}z')}</p>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void escapedElAndScriptletDelimitersInTemplateText() {
+        rewriteRun(
+                jsp(
+                        """
+                        <p>Price: \\${amount}, not EL. Tag: <\\% not a scriptlet %></p>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void standardActionsUseBeanSetPropertyAndInclude() {
+        rewriteRun(
+                jsp(
+                        """
+                        <jsp:useBean id="user" class="com.example.User" scope="session"/>
+                        <jsp:setProperty name="user" property="name" value="Ada"/>
+                        <jsp:include page="footer.jsp">
+                            <jsp:param name="year" value="2026"/>
+                        </jsp:include>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void customTagWithElInAttributeAndNestedBody() {
+        rewriteRun(
+                jsp(
+                        """
+                        <c:if test="${not empty user && user.age > 18}">
+                            <c:forEach var="item" items="${items}">
+                                <p>${item.name}</p>
+                            </c:forEach>
+                        </c:if>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void attributeValueContainingEscapedQuote() {
+        rewriteRun(
+                jsp(
+                        """
+                        <c:out value="she said \\"hi\\"" default="none"/>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void fullPageMixingEverything() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="text/html;charset=UTF-8" %>
+                        <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+                        <%!
+                            private static int visits = 0;
+                        %>
+                        <%-- track visits --%>
+                        <% visits++; %>
+                        <!DOCTYPE html>
+                        <html>
+                        <body>
+                            <h1>Welcome, ${sessionScope.user.name}!</h1>
+                            <c:if test="${visits > 1}">
+                                <p>You've been here <%= visits %> times.</p>
+                            </c:if>
+                            <c:forEach var="p" items="${products}">
+                                <div class="product">${p.name} - ${p.price}</div>
+                            </c:forEach>
+                        </body>
+                        </html>
+                        """
+                )
+        );
+    }
+}
