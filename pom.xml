@@ -36,11 +36,22 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+      <dependency>
+        <groupId>io.resys.openrewrite</groupId>
+        <artifactId>resys-openrewrite-jsp-parser</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.resys.openrewrite</groupId>
+        <artifactId>resys-openrewrite-jsp-receipes</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
   <modules>
     <module>parser</module>
+    <module>receipes</module>
   </modules>
 
   <build>
