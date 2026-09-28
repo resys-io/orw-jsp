@@ -7,28 +7,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 An [OpenRewrite](https://docs.openrewrite.org/) language module for JSP: a Lossless Semantic Tree
 (LST) parser, printer, and visitor infrastructure for the "standard syntax" defined by
 [Jakarta Server Pages 4.0](https://jakarta.ee/specifications/pages/4.0/jakarta-server-pages-spec-4.0)
-(`<% %>`-style constructs). This lets OpenRewrite recipes read, search, and rewrite `.jsp`/`.jspf`
-files the same way `rewrite-java`, `rewrite-xml`, etc. do for their languages.
+(`<% %>`-style constructs), plus a growing set of recipes built on top of it. This lets OpenRewrite
+recipes read, search, and rewrite `.jsp`/`.jspf` files the same way `rewrite-java`, `rewrite-xml`,
+etc. do for their languages.
 
-Coordinates: `io.resys.openrewrite:openrewrite-jsp-parser:1.0-SNAPSHOT`, Java 21, built against
-OpenRewrite 8.90.4 (`rewrite-bom`) and JUnit 6.1.3 (`junit-bom`).
+Root coordinates: `io.resys.openrewrite:resys-openrewrite-jsp:1.0-SNAPSHOT` (a `pom`-packaged
+reactor, no code of its own). Java 21, built against OpenRewrite 8.90.4 (`rewrite-bom`) and JUnit
+6.1.3 (`junit-bom`), both pinned in the root `pom.xml` and inherited by every module.
+
+**Note on spelling:** the recipes module and its package are spelled `receipes` (not `recipes`)
+throughout — `artifactId=resys-openrewrite-jsp-receipes`, package
+`io.resys.openrewrite.jsp.receipes`. This is a pre-existing typo baked into the directory layout,
+artifactId, and package name consistently; match it exactly in new code rather than "fixing" only
+part of it (which would just create an inconsistent mix of both spellings).
+
+## Modules
+
+- **`parser`** (`resys-openrewrite-jsp-parser`) — the LST itself: `Jsp` tree model, `JspParser`,
+  `JspVisitor`/`JspIsoVisitor`, `JspPrinter`, and the `Assertions.jsp(...)` test helper. See
+  **Parser architecture** below.
+- **`receipes`** (`resys-openrewrite-jsp-receipes`) — `Recipe` subclasses built on the parser, e.g.
+  `RemoveUnusedTaglibs`. Depends on `parser`. See **Recipes** below.
+
+Both modules follow the same dependency shape: `lombok` and `org.jetbrains:annotations` as
+`provided`; `rewrite-test` as `provided` (not `test`) because each module's `Assertions` class lives
+in `src/main` and is meant to be reused by consumers' own tests; `junit-jupiter` as `test`.
 
 ## Build
 
-Maven, toolchain-free (no wrapper is checked in — `.mvn/` is empty). Requires JDK 21.
+Maven, toolchain-free (no wrapper is checked in — `.mvn/` is empty). Requires JDK 21. Run from the
+repo root; Maven resolves the multi-module reactor automatically.
 
 ```sh
-mvn compile                              # compile main sources
-mvn test                                  # run all tests
-mvn test -Dtest=JspParserTest#pageDirective   # single test method
-mvn package                              # build the jar into target/
+mvn clean install                                            # build + test every module, in order
+mvn -pl receipes -am test                                     # test receipes, building parser first
+mvn -pl parser test -Dtest=JspParserTest#pageDirective         # single test method in one module
 ```
 
-Lombok (`@Value`/`@With`/`@EqualsAndHashCode`) generates the LST's boilerplate at compile time via
-annotation processing — no extra Maven config needed, but an IDE must have its Lombok plugin
-enabled to resolve the generated accessors/`with*` methods.
+Lombok (`@Value`/`@With`/`@EqualsAndHashCode`) generates boilerplate at compile time via annotation
+processing — no extra Maven config needed, but an IDE must have its Lombok plugin enabled to
+resolve the generated accessors/`with*` methods.
 
-## Architecture
+## Parser architecture (`parser` module)
 
 The design deliberately mirrors `org.openrewrite.properties` (a small, hand-written, non-ANTLR
 OpenRewrite language module) rather than `rewrite-xml`/`rewrite-toml` (which use generated ANTLR
@@ -60,9 +80,7 @@ literal text.
   byte-for-byte when the tree is unmodified (`Parser.requirePrintEqualsInput` enforces this on
   every parse, in both production use and tests).
 - `Assertions.java` — `Assertions.jsp(...)` `SourceSpecs` factory for use with
-  `RewriteTest.rewriteRun(...)`, mirroring `org.openrewrite.properties.Assertions`. It lives in
-  `src/main` (not `src/test`) so recipe authors depending on this jar get it too; that's why
-  `rewrite-test` is a `provided`-scope dependency in `pom.xml` rather than `test`-scope.
+  `RewriteTest.rewriteRun(...)`, mirroring `org.openrewrite.properties.Assertions`.
 
 **Why every non-`Text` node's `prefix` is always `""` from the parser:** whitespace/markup between
 recognized JSP constructs is itself arbitrary content (not just whitespace), so it's captured as a
@@ -71,6 +89,11 @@ sibling `Jsp.Text` node rather than folded into the following node's `prefix` fi
 on every node for interface uniformity and so recipes can set it when inserting new nodes.
 `Attribute`/`Attribute.Value`/`Tag.Closing` are the exception — their surrounding whitespace *is*
 a true prefix, exactly like `Xml.Attribute`.
+
+**A direct consequence for recipe authors:** removing a top-level `Jsp.Content` node (e.g. a
+`Directive`) does *not* remove the blank line it stood on — the newline(s) around it live in
+sibling `Jsp.Text` nodes that are untouched. `RemoveUnusedTaglibs` (see below) is a real example of
+this; it's expected/documented behavior, not a bug to work around.
 
 **Known, documented limitations** (see the class Javadoc on `Jsp` and `JspParser` for details):
 - Scriptlet/declaration/expression code is terminated by the first unescaped `%>`; a `%>` inside a
@@ -82,6 +105,27 @@ a true prefix, exactly like `Xml.Attribute`.
 `Declaration`/`Scriptlet`/`ExpressionScriptlet` expose both `getCode()` (with `%\>` escapes
 resolved to a literal `%>`) and `getCodeSource()` (raw, escapes intact) — the same
 decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-continuations.
+
+## Recipes (`receipes` module)
+
+- **`RemoveUnusedTaglibs`** — removes `<%@ taglib prefix="..." ... %>` directives whose prefix is
+  never referenced. "Referenced" deliberately covers two cases, not just one: a custom tag
+  (`<prefix:tag>`) *and* an EL function reference (`${prefix:function(...)}`), including inside
+  attribute values. That second case is what makes this non-trivial — function-only libraries like
+  the JSTL functions library (`fn`) are never used as an element, only from EL, so a naive
+  "scan for `<prefix:...>` tags" implementation would incorrectly delete a taglib the page still
+  needs. The usage scan is deliberately permissive (a raw `prefix:` substring match, not a fully
+  parsed EL function call) so mistakes can only lean toward *keeping* an unused taglib, never
+  toward wrongly deleting a used one.
+
+Recipes here follow the `@Value @EqualsAndHashCode(callSuper = false)` declarative style used
+throughout OpenRewrite (see `org.openrewrite.xml.RemoveXmlTag` for the canonical example):
+`displayName`/`description` as plain fields (Lombok generates the getters `Recipe` requires), any
+user-facing parameters as `@Option`-annotated fields, and the actual logic in an overridden
+`getVisitor()` returning a `JspIsoVisitor<ExecutionContext>`. Node removal from a `List<Jsp.Content>`
+uses `ListUtils.map(list, node -> shouldRemove(node) ? null : node)` — returning `null` from the
+mapping function is the standard OpenRewrite idiom for "delete this element" (see
+`org.openrewrite.properties.DeleteProperty` for another example).
 
 ## Testing conventions
 
@@ -97,10 +141,20 @@ class MyTest implements RewriteTest {
 ```
 
 Passing only a "before" source (no recipe, no "after") asserts a parse → print round trip that
-reproduces the input exactly — this is the primary way this module is tested (see
-`JspParserTest`), since correctness here means byte-for-byte print fidelity across every JSP
+reproduces the input exactly — this is the primary way the `parser` module is tested (see
+`JspParserTest`), since correctness there means byte-for-byte print fidelity across every JSP
 construct in scope, not recipe behavior. When adding a new construct to the parser, add a
 round-trip test for it before anything else.
+
+For recipe tests that pass both a "before" and an "after" (see `RemoveUnusedTaglibsTest`): the
+harness runs `after` through `trimIndentPreserveCRLF` (stripping exactly one leading and one
+trailing blank line, as a text-block-fixture convention) but does **not** trim the actual printed
+output the same way. Concretely: an interior blank line in expected output round-trips fine in a
+text block, but if the real result's first or last character is a newline (e.g. immediately after
+removing a node that leaves a leading blank line, per the note above), that leading/trailing blank
+line cannot be expressed as a leading/trailing blank line in the text block — write a test fixture
+where the relevant content isn't first/last in the file instead (e.g. put a `page` directive before
+the directive under test) rather than fighting the framework.
 
 Malformed input must never hang or throw past the parser boundary — `JspParser.parseInputs`
 catches parsing failures and returns `org.openrewrite.tree.ParseError` instead, per the

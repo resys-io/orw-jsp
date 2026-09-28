@@ -33,7 +33,7 @@
 
   <dependencies>
     <dependency>
-      <artifactId>resys-openrewrite-jsp</artifactId>
+      <artifactId>resys-openrewrite-jsp-parser</artifactId>
       <groupId>io.resys.openrewrite</groupId>
     </dependency>
     <dependency>
