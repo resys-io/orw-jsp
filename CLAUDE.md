@@ -48,6 +48,16 @@ Lombok (`@Value`/`@With`/`@EqualsAndHashCode`) generates boilerplate at compile 
 processing — no extra Maven config needed, but an IDE must have its Lombok plugin enabled to
 resolve the generated accessors/`with*` methods.
 
+`org.jspecify.annotations.Nullable` is `TYPE_USE`-only, which bites on any method returning a
+*nested* `Jsp` type (`Jsp.Directive`, `Jsp.Tag`, `Jsp.Attribute.Value`, ...): `@Nullable` has to sit
+between the outer and inner name, e.g. `Jsp.@Nullable Directive foo(...)`, not
+`@Nullable Jsp.Directive foo(...)` or `private static @Nullable Jsp.Directive` — both of the latter
+fail with `scoping construct cannot be annotated with type-use annotation`, and (because that error
+aborts annotation processing for the whole compilation unit) surface as a spurious
+`does not override abstract method getDescription()` on unrelated Lombok-based `Recipe` classes in
+the same module. See `org.openrewrite.properties.PropertiesParser#extractContent` upstream for the
+same pattern (`Properties.@Nullable Content`), and `RemoveUnusedImports#rewritePageDirective` here.
+
 ## Parser architecture (`parser` module)
 
 The design deliberately mirrors `org.openrewrite.properties` (a small, hand-written, non-ANTLR
@@ -117,6 +127,26 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   needs. The usage scan is deliberately permissive (a raw `prefix:` substring match, not a fully
   parsed EL function call) so mistakes can only lean toward *keeping* an unused taglib, never
   toward wrongly deleting a used one.
+- **`RemoveUnusedImports`** — removes unreferenced *and* duplicate classes from
+  `<%@ page import="..." %>` directives. `import` is the one `page` attribute that's a
+  comma-separated list and may repeat across multiple `<%@ page %>` directives (JSP spec §7.3.3);
+  each entry is checked independently against every whole-word occurrence of its simple class name
+  across all scriptlets, declarations, and expression scriptlets (including inside custom tag
+  bodies). Deduplication is tracked across the *whole page*, not just within one comma list: the
+  first occurrence of a given import text is the one subject to the usual unused check, and every
+  later occurrence — same comma list or a different `<%@ page import="..." %>` directive further
+  down — is dropped outright as redundant, regardless of whether it's independently "used" (an
+  entry whose first occurrence was itself unused-and-dropped is *not* treated as "seen", so a
+  second occurrence is evaluated on its own merits, not just assumed to be droppable). If removing
+  entries empties a directive's `import` attribute, the attribute is dropped; if `import` was that
+  directive's only attribute, the whole directive is removed — but a directive with other
+  attributes (e.g. `contentType`) alongside `import` only loses the `import` attribute, never the
+  whole directive.
+  Two deliberately conservative choices, both because getting them wrong deletes something a page
+  still needs: wildcard imports (`import="java.util.*"`) are never touched (no way to tell if
+  "anything from this package" is used without a real type checker), and usage is a whole-word
+  match on the simple name, not a resolved type reference — same "can only false-positive toward
+  keeping, never toward deleting" safety property as `RemoveUnusedTaglibs`.
 
 Recipes here follow the `@Value @EqualsAndHashCode(callSuper = false)` declarative style used
 throughout OpenRewrite (see `org.openrewrite.xml.RemoveXmlTag` for the canonical example):
