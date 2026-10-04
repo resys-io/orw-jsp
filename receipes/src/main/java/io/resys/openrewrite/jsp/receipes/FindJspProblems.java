@@ -52,6 +52,14 @@ import java.util.Set;
  *     read from Java, EL, {@code getAttribute("...")}, or {@code <jsp:getProperty name>}. Reported once
  *     per variable, at its first use after the include. A page that defines the name itself, or a
  *     variable only visible inside a block or a {@code <c:forEach>} body, is not reported.</li>
+ *     <li>{@code UNKNOWN_TAG}, {@code UNKNOWN_ATTRIBUTE}, {@code MISSING_REQUIRED_ATTRIBUTE},
+ *     {@code INVALID_TAG_BODY} (a body on a {@code body-content="empty"} tag, or scripting in a
+ *     {@code scriptless} one), {@code UNKNOWN_EL_FUNCTION} - a custom tag or EL function call that
+ *     doesn't match its library's tag library descriptor (TLD), with a "did you mean" suggestion
+ *     for near misses. Only checked for taglibs whose TLD the parser resolved (see
+ *     {@link io.resys.openrewrite.jsp.JspParser.Builder#taglib} and
+ *     {@link io.resys.openrewrite.jsp.JspParser.Builder#tldSearchPath}); a TLD's {@code <variable>}
+ *     declarations also make {@code VARIABLE_FROM_INCLUDE} exact for its tags.</li>
  *     <li>{@code UNRESOLVED_INCLUDE} - a static include that could not be resolved; tag balance is
  *     then not checked for the page.</li>
  * </ul>

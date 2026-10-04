@@ -129,6 +129,26 @@ unresolved include anywhere in it (including nested inside an included file), be
 see what that file uses. Call `UnresolvedIncludes.mustSkip(document, recipeName)` at the top of
 `visitDocument`; it logs one `System.Logger` WARNING per unresolved include.
 
+**Tag library descriptors (TLDs)** are resolved for each `<%@ taglib uri="..." %>` by
+`internal/TagLibraryResolver`. The result is attached to the directive as a `tree.TagLibrary`
+marker: metadata only, never printed. It lists the library's tags (body-content, attributes and
+whether they're required, `<variable>`s, dynamic attributes) and EL functions. Lookup order:
+1. `JspParser.builder().taglib(uri, path)`, where the path is a `.tld` file, or a jar or directory
+   holding a TLD that declares that `<uri>`.
+2. `builder().tldSearchPath(...)`: directories, searched recursively for `.tld` files and jars, and
+   jars. This is how a Maven project points at JSTL, which isn't in the source tree.
+3. The web application, found as the nearest ancestor of the page with a `WEB-INF`: a uri that is
+   itself a path to the TLD, then `<taglib>` entries in `WEB-INF/web.xml`, then TLDs under
+   `WEB-INF` (excluding `classes`/`lib`), then `WEB-INF/lib/*.jar`, matched by `<uri>`.
+
+An unresolved taglib just gets no marker and no `ParseWarning`. A warning would make the
+`RemoveUnused*` recipes skip the page through `UnresolvedIncludes`, and libraries in dependency
+jars are routinely unresolvable. TLD XML is parsed with external entities and DTD loading
+disabled, because old JSP 1.1 TLDs carry a `DOCTYPE` pointing at a DTD URL. JSP 1.1 element names
+(`bodycontent`, `shortname`, `teiclass`) are accepted. In tests, configure the parser with
+`spec.parser(JspParser.builder().taglib(...))` and put real files in a `@TempDir` (see
+`JspTagLibraryTest`).
+
 **Known, documented limitations** (see the class Javadoc on `Jsp` and `JspParser` for details):
 - Scriptlet/declaration/expression code is terminated by the first unescaped `%>`; a `%>` inside a
   Java string/char literal in that code will end the tag early.
@@ -183,7 +203,15 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   definitions and uses are found by regex in `JspVariables`, not by a real Java or EL parser.
   Java declarations only count when they are at the top level: text nested in `()`/`{}` is
   blanked first, and the analyzer tracks the `javaDepth` of blocks left open across scriptlets.
-  A definition in the page itself shadows the included one. The logic lives in `JspPageAnalyzer`. Because HTML is
+  A definition in the page itself shadows the included one. When a tag's TLD lists
+  `<variable>`s (and has no `tei-class`), those replace the `var=` heuristic: `NESTED` variables
+  are ignored, `AT_BEGIN`/`AT_END` ones count. JSTL declares none, so its tags keep using the
+  heuristic. With a resolved TLD the analyzer also validates tag usage (`UNKNOWN_TAG`,
+  `UNKNOWN_ATTRIBUTE`, `MISSING_REQUIRED_ATTRIBUTE` counting `<jsp:attribute>` children,
+  `INVALID_TAG_BODY`, `UNKNOWN_EL_FUNCTION`) against the prefixes in effect at each point of the
+  walk, including taglibs declared in included files. A misuse inside an included file is
+  reported by the including page only when the taglib was declared outside that file, since the
+  file alone couldn't resolve it. The logic lives in `JspPageAnalyzer`. Because HTML is
   only `Jsp.Text` in the LST, it runs its own small HTML tokenizer over the text nodes in document
   order. The tokenizer's state carries across JSP nodes, which is what makes "a scriptlet inside
   `<option ...>`" visible at all. Open elements sit on a stack interleaved with *barriers* (a JSP

@@ -4,7 +4,9 @@ import org.intellij.lang.annotations.Language;
 import org.jspecify.annotations.Nullable;
 import org.openrewrite.*;
 import org.openrewrite.internal.EncodingDetectingInputStream;
+import io.resys.openrewrite.jsp.internal.TagLibraryResolver;
 import io.resys.openrewrite.jsp.tree.Jsp;
+import io.resys.openrewrite.jsp.tree.TagLibrary;
 import org.openrewrite.marker.Markers;
 import org.openrewrite.tree.ParseError;
 import org.openrewrite.tree.ParsingEventListener;
@@ -16,8 +18,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,6 +53,13 @@ import static org.openrewrite.Tree.randomId;
  * why, rather than failing the including page. A recursive include is also left {@code null}, but
  * without a warning: the file it names is already part of the tree.
  * <p>
+ * The tag library descriptor (TLD) of each {@code <%@ taglib uri="..." %>} is resolved, if it can
+ * be, and attached to the directive as a {@link TagLibrary} marker (see
+ * {@link TagLibraryResolver} for the lookup order: explicit {@link Builder#taglib} mappings, the
+ * {@link Builder#tldSearchPath}, then the web application's {@code web.xml}, {@code WEB-INF} and
+ * {@code WEB-INF/lib} jars). An unresolved taglib simply has no marker; it is not a warning, since
+ * libraries that live in dependency jars commonly can't be resolved from the source tree.
+ * <p>
  * Known limitations (documented rather than silently mishandled):
  * <ul>
  *     <li>Scriptlet/declaration/expression bodies are terminated by the first unescaped {@code %>};
@@ -61,6 +72,25 @@ import static org.openrewrite.Tree.randomId;
  */
 public class JspParser implements Parser {
 
+    private final Map<String, Path> taglibs;
+    private final List<Path> tldSearchPath;
+
+    public JspParser() {
+        this(Map.of(), List.of());
+    }
+
+    /**
+     * @param taglibs       explicit taglib uri to TLD file (or to a jar or directory containing the
+     *                      TLD declaring that uri) mappings.
+     * @param tldSearchPath directories and jars searched for TLDs by their {@code <uri>}.
+     * @see Builder#taglib(String, Path)
+     * @see Builder#tldSearchPath(Path...)
+     */
+    public JspParser(Map<String, Path> taglibs, List<Path> tldSearchPath) {
+        this.taglibs = Map.copyOf(taglibs);
+        this.tldSearchPath = List.copyOf(tldSearchPath);
+    }
+
     @Override
     public Stream<SourceFile> parse(@Language("JSP") String... sources) {
         return parse(new InMemoryExecutionContext(), sources);
@@ -69,7 +99,7 @@ public class JspParser implements Parser {
     @Override
     public Stream<SourceFile> parseInputs(Iterable<Input> sourceFiles, @Nullable Path relativeTo, ExecutionContext ctx) {
         ParsingEventListener parsingListener = ParsingExecutionContextView.view(ctx).getParsingListener();
-        Includes includes = new Includes(sourceFiles, relativeTo, ctx);
+        Includes includes = new Includes(sourceFiles, relativeTo, ctx, taglibs, tldSearchPath);
         return acceptedInputs(sourceFiles).map(input -> {
             parsingListener.startedParsing(input);
             Path path = input.getRelativePath(relativeTo);
@@ -118,13 +148,37 @@ public class JspParser implements Parser {
     }
 
     public static class Builder extends Parser.Builder {
+        private final Map<String, Path> taglibs = new LinkedHashMap<>();
+        private final List<Path> tldSearchPath = new ArrayList<>();
+
         public Builder() {
             super(Jsp.Document.class);
         }
 
+        /**
+         * Maps a taglib {@code uri} to the location of its TLD: a {@code .tld} file, or a jar or
+         * directory containing a TLD that declares this {@code <uri>}. Relative paths are resolved
+         * against the parse's {@code relativeTo} (or the working directory). Takes precedence over
+         * every other way of resolving the uri.
+         */
+        public Builder taglib(String uri, Path location) {
+            taglibs.put(uri, location);
+            return this;
+        }
+
+        /**
+         * Adds directories (searched recursively for {@code .tld} files and jars) and jars (searched in
+         * {@code META-INF}) whose TLDs are matched to taglib uris by their {@code <uri>} element,
+         * e.g. the JSTL jar of a Maven project, which isn't in the source tree's {@code WEB-INF/lib}.
+         */
+        public Builder tldSearchPath(Path... locations) {
+            tldSearchPath.addAll(Arrays.asList(locations));
+            return this;
+        }
+
         @Override
         public JspParser build() {
-            return new JspParser();
+            return new JspParser(taglibs, tldSearchPath);
         }
 
         @Override
@@ -226,6 +280,17 @@ public class JspParser implements Parser {
         sc.advance(2);
         Markers markers = Markers.EMPTY;
         Jsp.IncludedFile includedFile = null;
+        if ("taglib".equals(name)) {
+            for (Jsp.Attribute attribute : attributes) {
+                if ("uri".equals(attribute.getName())) {
+                    TagLibrary library = sc.file.includes().tagLibraries
+                            .resolve(attribute.getValue().getValue(), sc.file.absolutePath());
+                    if (library != null) {
+                        markers = markers.add(library);
+                    }
+                }
+            }
+        }
         if ("include".equals(name)) {
             String file = "";
             for (Jsp.Attribute attribute : attributes) {
@@ -511,10 +576,13 @@ public class JspParser implements Parser {
         private final Map<Path, Input> inputsByPath = new HashMap<>();
         private final Path base;
         private final ExecutionContext ctx;
+        final TagLibraryResolver tagLibraries;
 
-        Includes(Iterable<Input> inputs, @Nullable Path relativeTo, ExecutionContext ctx) {
+        Includes(Iterable<Input> inputs, @Nullable Path relativeTo, ExecutionContext ctx,
+                 Map<String, Path> taglibs, List<Path> tldSearchPath) {
             this.base = (relativeTo == null ? Paths.get("") : relativeTo).toAbsolutePath().normalize();
             this.ctx = ctx;
+            this.tagLibraries = new TagLibraryResolver(taglibs, tldSearchPath, base);
             for (Input input : inputs) {
                 inputsByPath.putIfAbsent(absolute(input.getPath()), input);
             }

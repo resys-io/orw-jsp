@@ -1,5 +1,7 @@
 package io.resys.openrewrite.jsp.receipes;
 
+import io.resys.openrewrite.jsp.tree.Jsp;
+import io.resys.openrewrite.jsp.tree.TagLibrary;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -35,7 +37,12 @@ final class JspVariables {
         /**
          * A {@code <jsp:useBean>}: both a Java variable and a scoped attribute.
          */
-        BEAN("bean declared with <jsp:useBean>");
+        BEAN("bean declared with <jsp:useBean>"),
+        /**
+         * A scripting variable a custom tag declares in its TLD ({@code <variable>}); tag handlers
+         * conventionally also store it as a page attribute, so it's visible to EL too.
+         */
+        TAG_VARIABLE("variable declared by a tag's TLD");
 
         final String description;
 
@@ -48,7 +55,7 @@ final class JspVariables {
         }
 
         boolean visibleToEl() {
-            return this == SCOPED_ATTRIBUTE || this == BEAN;
+            return this == SCOPED_ATTRIBUTE || this == BEAN || this == TAG_VARIABLE;
         }
     }
 
@@ -163,6 +170,32 @@ final class JspVariables {
             return new Definition(value, Kind.SCOPED_ATTRIBUTE, 0);
         }
         return null;
+    }
+
+    /**
+     * @return the variables a tag's TLD declares that outlive the tag ({@code AT_BEGIN} or
+     * {@code AT_END}; {@code NESTED} ones only exist in its body), named either by the TLD or by
+     * the value of the attribute the TLD names.
+     */
+    static List<Definition> tldDefinitions(Jsp.Tag tag, TagLibrary.TagDescriptor descriptor) {
+        List<Definition> definitions = new ArrayList<>();
+        for (TagLibrary.VariableDescriptor variable : descriptor.getVariables()) {
+            if ("NESTED".equalsIgnoreCase(variable.getScope())) {
+                continue;
+            }
+            String name = variable.getNameGiven();
+            if (name == null && variable.getNameFromAttribute() != null) {
+                for (Jsp.Attribute attribute : tag.getAttributes()) {
+                    if (attribute.getName().equals(variable.getNameFromAttribute())) {
+                        name = attribute.getValue().getValue();
+                    }
+                }
+            }
+            if (name != null && !name.isEmpty() && !name.contains("${") && !name.contains("<%")) {
+                definitions.add(new Definition(name, Kind.TAG_VARIABLE, 0));
+            }
+        }
+        return definitions;
     }
 
     /**

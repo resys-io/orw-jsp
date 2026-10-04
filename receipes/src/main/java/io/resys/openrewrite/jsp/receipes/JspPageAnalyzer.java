@@ -2,6 +2,7 @@ package io.resys.openrewrite.jsp.receipes;
 
 import io.resys.openrewrite.jsp.internal.JspPrinter;
 import io.resys.openrewrite.jsp.tree.Jsp;
+import io.resys.openrewrite.jsp.tree.TagLibrary;
 import org.jspecify.annotations.Nullable;
 import org.openrewrite.ParseWarning;
 import org.openrewrite.PrintOutputCapture;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.openrewrite.Tree.randomId;
@@ -52,6 +54,11 @@ final class JspPageAnalyzer {
         LARGE_SCRIPTLET(false),
         JSP_IN_HTML_COMMENT(false),
         VARIABLE_FROM_INCLUDE(false),
+        UNKNOWN_TAG(false),
+        UNKNOWN_ATTRIBUTE(false),
+        MISSING_REQUIRED_ATTRIBUTE(false),
+        INVALID_TAG_BODY(false),
+        UNKNOWN_EL_FUNCTION(false),
         UNRESOLVED_INCLUDE(false);
 
         /**
@@ -164,6 +171,14 @@ final class JspPageAnalyzer {
     private int javaDepth;
 
     /**
+     * A taglib prefix in effect, with its TLD if the parser could resolve it, and the file declaring it.
+     */
+    private record DeclaredLibrary(@Nullable TagLibrary library, Path file) {
+    }
+
+    private final Map<String, DeclaredLibrary> taglibsByPrefix = new HashMap<>();
+
+    /**
      * @param fragment whether the page is a fragment (a {@code .jspf}, or a file other pages
      *                 include), whose markup may legitimately be closed or opened by its includers.
      */
@@ -273,6 +288,7 @@ final class JspPageAnalyzer {
                     useJava(((Jsp.ExpressionScriptlet) node).getCode(), node);
                 } else {
                     useEl(((Jsp.ExpressionLanguage) node).getExpression(), node);
+                    checkElFunctions(((Jsp.ExpressionLanguage) node).getExpression(), node);
                 }
                 visitExpression(node, node instanceof Jsp.ExpressionLanguage ? "EL expression" : "expression");
                 advance(print(node));
@@ -282,6 +298,161 @@ final class JspPageAnalyzer {
                 advance(print(node));
             }
         }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Validation against tag library descriptors
+    // -----------------------------------------------------------------------------------------
+
+    private static final Pattern EL_FUNCTION_CALL =
+            Pattern.compile("(?<![\\w$.])([A-Za-z_][\\w-]*):([A-Za-z_$][\\w$]*)\\s*\\(");
+
+    /**
+     * Checks a custom action against its library's TLD, if the prefix's taglib was resolved.
+     *
+     * @return the tag's descriptor, or {@code null} if there is none to check against.
+     */
+    private TagLibrary.@Nullable TagDescriptor validateTag(Jsp.Tag tag, Location location) {
+        int colon = tag.getName().indexOf(':');
+        DeclaredLibrary declared = taglibsByPrefix.get(tag.getName().substring(0, colon));
+        if (declared == null || declared.library() == null) {
+            return null;
+        }
+        TagLibrary library = declared.library();
+        String localName = tag.getName().substring(colon + 1);
+        TagLibrary.TagDescriptor descriptor = library.findTag(localName);
+        if (descriptor == null) {
+            reportTagProblem(Rule.UNKNOWN_TAG, location, declared,
+                    "<" + tag.getName() + "> is not defined in tag library '" + library.getUri() + "'" +
+                    suggestion(localName, library.getTags().stream().map(TagLibrary.TagDescriptor::getName).toList()));
+            return null;
+        }
+        if (descriptor.isTagFile()) {
+            return descriptor;
+        }
+
+        Set<String> given = new HashSet<>();
+        for (Jsp.Attribute attribute : tag.getAttributes()) {
+            given.add(attribute.getName());
+            if (descriptor.findAttribute(attribute.getName()) == null && !descriptor.isDynamicAttributes()) {
+                reportTagProblem(Rule.UNKNOWN_ATTRIBUTE, location, declared,
+                        "<" + tag.getName() + "> has no attribute '" + attribute.getName() + "'" +
+                        suggestion(attribute.getName(), descriptor.getAttributes().stream()
+                                .map(TagLibrary.AttributeDescriptor::getName).toList()));
+            }
+        }
+        List<Jsp.Content> body = tag.getBody() == null ? List.of() : tag.getBody();
+        for (Jsp.Content child : body) {
+            // <jsp:attribute name="..."> supplies an attribute from the body.
+            if (child instanceof Jsp.Tag && "jsp:attribute".equals(((Jsp.Tag) child).getName())) {
+                ((Jsp.Tag) child).getAttributes().stream().filter(a -> "name".equals(a.getName()))
+                        .forEach(a -> given.add(a.getValue().getValue()));
+            }
+        }
+        for (TagLibrary.AttributeDescriptor attribute : descriptor.getAttributes()) {
+            if (attribute.isRequired() && !given.contains(attribute.getName())) {
+                reportTagProblem(Rule.MISSING_REQUIRED_ATTRIBUTE, location, declared,
+                        "<" + tag.getName() + "> is missing its required attribute '" + attribute.getName() + "'");
+            }
+        }
+
+        String bodyContent = descriptor.getBodyContent();
+        if ("empty".equalsIgnoreCase(bodyContent) && hasBodyContent(body)) {
+            reportTagProblem(Rule.INVALID_TAG_BODY, location, declared,
+                    "<" + tag.getName() + "> must have an empty body (its TLD declares body-content 'empty')");
+        } else if ("scriptless".equalsIgnoreCase(bodyContent) && hasScripting(body)) {
+            reportTagProblem(Rule.INVALID_TAG_BODY, location, declared,
+                    "<" + tag.getName() + "> must not contain scriptlets, declarations, or <%= %> expressions " +
+                    "(its TLD declares body-content 'scriptless')");
+        }
+        return descriptor;
+    }
+
+    private void checkElFunctions(String expression, Jsp node) {
+        String masked = expression.replaceAll("'(?:[^'\\\\]|\\\\.)*'|\"(?:[^\"\\\\]|\\\\.)*\"", "''");
+        Matcher m = EL_FUNCTION_CALL.matcher(masked);
+        while (m.find()) {
+            DeclaredLibrary declared = taglibsByPrefix.get(m.group(1));
+            if (declared != null && declared.library() != null &&
+                declared.library().findFunction(m.group(2)) == null) {
+                TagLibrary library = declared.library();
+                reportTagProblem(Rule.UNKNOWN_EL_FUNCTION, here(node), declared,
+                        "EL function " + m.group(1) + ":" + m.group(2) + "() is not defined in tag library '" +
+                        library.getUri() + "'" + suggestion(m.group(2), library.getFunctions().stream()
+                                .map(TagLibrary.FunctionDescriptor::getName).toList()));
+            }
+        }
+    }
+
+    /**
+     * Like {@link #report}, except that a problem inside an included file is also reported by the
+     * including page when the taglib was declared outside that file: the included file, analyzed
+     * on its own, wouldn't know the library, so it couldn't report the problem itself.
+     */
+    private void reportTagProblem(Rule rule, Location location, DeclaredLibrary declared, String message) {
+        if (location.file().equals(pageFile) || !location.file().equals(declared.file())) {
+            add(rule, location, message);
+        }
+    }
+
+    private static boolean hasBodyContent(List<Jsp.Content> body) {
+        for (Jsp.Content child : body) {
+            if (!(child instanceof Jsp.Comment) &&
+                !(child instanceof Jsp.Text && ((Jsp.Text) child).getText().isBlank()) &&
+                !(child instanceof Jsp.Tag && "jsp:attribute".equals(((Jsp.Tag) child).getName()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasScripting(List<Jsp.Content> body) {
+        for (Jsp.Content child : body) {
+            if (child instanceof Jsp.Scriptlet || child instanceof Jsp.Declaration ||
+                child instanceof Jsp.ExpressionScriptlet) {
+                return true;
+            }
+            if (child instanceof Jsp.Tag && ((Jsp.Tag) child).getBody() != null &&
+                hasScripting(((Jsp.Tag) child).getBody())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return {@code "; did you mean 'x'?"} for the closest candidate within two edits, or {@code ""}.
+     */
+    static String suggestion(String name, List<String> candidates) {
+        String best = null;
+        int bestDistance = 3;
+        for (String candidate : candidates) {
+            int distance = editDistance(name.toLowerCase(Locale.ROOT), candidate.toLowerCase(Locale.ROOT));
+            if (distance < bestDistance) {
+                best = candidate;
+                bestDistance = distance;
+            }
+        }
+        return best == null ? "" : "; did you mean '" + best + "'?";
+    }
+
+    private static int editDistance(String a, String b) {
+        int[] previous = new int[b.length() + 1];
+        int[] current = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) {
+            previous[j] = j;
+        }
+        for (int i = 1; i <= a.length(); i++) {
+            current[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int substitution = previous[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1);
+                current[j] = Math.min(substitution, Math.min(previous[j], current[j - 1]) + 1);
+            }
+            int[] swap = previous;
+            previous = current;
+            current = swap;
+        }
+        return previous[b.length()];
     }
 
     // -----------------------------------------------------------------------------------------
@@ -379,6 +550,14 @@ final class JspPageAnalyzer {
         directive.getMarkers().findFirst(ParseWarning.class).ifPresent(warning ->
                 add(Rule.UNRESOLVED_INCLUDE, location,
                         warning.getMessage() + "; tag balance is not checked for this page"));
+        if ("taglib".equals(directive.getName())) {
+            for (Jsp.Attribute attribute : directive.getAttributes()) {
+                if ("prefix".equals(attribute.getName())) {
+                    taglibsByPrefix.put(attribute.getValue().getValue(), new DeclaredLibrary(
+                            directive.getMarkers().findFirst(TagLibrary.class).orElse(null), file));
+                }
+            }
+        }
         advance(print(directive));
 
         Jsp.IncludedFile includedFile = directive.getIncludedFile();
@@ -481,17 +660,31 @@ final class JspPageAnalyzer {
     private void visitTag(Jsp.Tag tag) {
         checkInHtmlComment(tag, "a JSP tag <" + tag.getName() + ">");
         Location location = here(tag);
+        TagLibrary.TagDescriptor descriptor = validateTag(tag, location);
+        // A TLD that lists the tag's variables is authoritative; otherwise (e.g. JSTL, whose tags
+        // publish their var= attributes at runtime rather than declaring them) fall back to var=.
+        boolean variablesFromTld = descriptor != null && !descriptor.getVariables().isEmpty() &&
+                                   !descriptor.isExtraInfo();
         for (Jsp.Attribute attribute : tag.getAttributes()) {
             String value = attribute.getValue().getValue();
             // Uses first: in <c:set var="x" value="${x + 1}"/>, the x read is the earlier one.
-            JspVariables.elInText(value).forEach(el -> useEl(el, tag));
+            JspVariables.elInText(value).forEach(el -> {
+                useEl(el, tag);
+                checkElFunctions(el, tag);
+            });
             JspVariables.expressionsInText(value).forEach(code -> useJava(code, tag));
             if (("jsp:getProperty".equals(tag.getName()) || "jsp:setProperty".equals(tag.getName())) &&
                 "name".equals(attribute.getName())) {
                 useScoped(value, tag);
             }
-            JspVariables.Definition definition = JspVariables.tagDefinition(tag.getName(), attribute.getName(), value);
+            JspVariables.Definition definition = variablesFromTld ? null :
+                    JspVariables.tagDefinition(tag.getName(), attribute.getName(), value);
             if (definition != null) {
+                define(definition, location);
+            }
+        }
+        if (variablesFromTld) {
+            for (JspVariables.Definition definition : JspVariables.tldDefinitions(tag, descriptor)) {
                 define(definition, location);
             }
         }
