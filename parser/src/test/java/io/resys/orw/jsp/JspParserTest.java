@@ -254,7 +254,8 @@ class JspParserTest implements RewriteTest {
 
     @Test
     void requestTimeAttributeValueWithQuotesInsideTheExpression() {
-        // Common in Struts 1 pages; Jasper reads such a value up to its %>.
+        // Common in Struts 1 pages; legacy containers (and Jasper with strictQuoteEscaping=false) read
+        // such a value up to its %>.
         rewriteRun(
                 jsp(
                         """

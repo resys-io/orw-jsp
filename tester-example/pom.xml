@@ -11,4 +11,35 @@
 
   <artifactId>resys-orw-jsp-tester-example</artifactId>
 
+  <!--
+    A small Struts 1 style web application (src/main/webapp) whose pages are tested with the tester
+    (src/test): real JSTL and Struts bean/logic tags, Struts html tags mocked (they need a running
+    ActionServlet), and an in-house tag library with no implementation, mocked automatically.
+  -->
+
+  <dependencies>
+    <!-- What the application itself uses. -->
+    <dependency>
+      <groupId>org.apache.struts</groupId>
+      <artifactId>struts-taglib</artifactId>
+      <version>1.3.10</version>
+    </dependency>
+    <dependency>
+      <groupId>javax.servlet</groupId>
+      <artifactId>jstl</artifactId>
+      <version>1.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.resys.orw</groupId>
+      <artifactId>resys-orw-jsp-tester</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>

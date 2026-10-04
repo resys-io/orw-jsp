@@ -1,0 +1,25 @@
+{
+  "page": "/WEB-INF/views/orders.jsp",
+  "parameters": { "q": "boots" },
+  "request": {
+    "orders": [
+      {
+        "@class": "com.acme.shop.Order",
+        "id": 1001,
+        "customer": { "name": "Ann", "vip": true },
+        "total": 19.90,
+        "lines": [ { "product": "Boots", "quantity": 1 }, { "product": "Socks", "quantity": 3 } ]
+      },
+      {
+        "@class": "com.acme.shop.Order",
+        "id": 1002,
+        "customer": { "name": "Bob", "vip": false },
+        "total": 5.00,
+        "lines": []
+      }
+    ]
+  },
+  "session": {
+    "user": { "@class": "com.acme.shop.Customer", "name": "Clerk", "vip": false }
+  }
+}

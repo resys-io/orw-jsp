@@ -28,8 +28,14 @@ part of it (which would just create an inconsistent mix of both spellings).
   **Parser architecture** below.
 - **`receipes`** (`resys-orw-jsp-receipes`) — `Recipe` subclasses built on the parser, e.g.
   `RemoveUnusedTaglibs`. Depends on `parser`. See **Recipes** below.
+- **`tester`** (`resys-orw-jsp-tester`) — a test library that renders pages with embedded Tomcat 9,
+  with JSON fixtures, snapshot expected output, and tag mocking. It validates that migrations keep
+  page output unchanged. See **Tester** below.
+- **`tester-example`** (`resys-orw-jsp-tester-example`) — a small Struts 1 webapp (`src/main/webapp`,
+  model beans in `com.acme.shop`) tested with the tester. It is both an example and a testbed:
+  change the tester, then run this module.
 
-Both modules follow the same dependency shape: `lombok` and `org.jetbrains:annotations` as
+`parser` and `receipes` follow the same dependency shape: `lombok` and `org.jetbrains:annotations` as
 `provided`; `rewrite-test` as `provided` (not `test`) because each module's `Assertions` class lives
 in `src/main` and is meant to be reused by consumers' own tests; `junit-jupiter` as `test`.
 
@@ -157,7 +163,8 @@ disabled, because old JSP 1.1 TLDs carry a `DOCTYPE` pointing at a DTD URL. JSP 
 - The all-XML "JSP document" syntax (`.jspx`) and tag files (`.tag`/`.tagx`) are not handled.
 
 **Request-time attribute values.** A quoted attribute value that starts with `<%=` is read up to its
-`%>` (then the closing quote), as Jasper does. So `value="<%= bean.get("x") %>"`, with unescaped
+`%>` (then the closing quote), as legacy containers did (and Tomcat 8.5+ still does with
+`strictQuoteEscaping=false`, which the tester sets). So `value="<%= bean.get("x") %>"`, with unescaped
 quotes inside the Java, parses. Struts 1 pages are full of these, and before this rule existed
 they failed to parse entirely (see `JspParserTest#requestTimeAttributeValueWithQuotesInsideTheExpression`).
 
@@ -363,3 +370,48 @@ recipes):
   `Tag.Closing#getBeforeTagDelimiterPrefix()`.
 
 Code that reads `Jsp.Tag#getClosing()` must handle `null` even when `isSelfClosing()` is false.
+
+## Tester (`tester` module)
+
+Package `io.resys.orw.jsp.tester`. The public API is `JspTester` (builder, `render`/`renderOk`,
+`verify`, `fixtureTests`), `RenderRequest`, `Rendered`, `MockBehavior`, `Fixtures`, `Comparison`,
+`Renderer`, and `MockTag`, which has to be public because generated classes extend it. Internals
+are in `.internal`.
+
+- **Tomcat 9, deliberately:** `tomcat.version` is 9.0.x because the target applications (Struts 1)
+  use `javax.servlet`. Don't "upgrade" to 10+/jakarta.
+- **How a render works:** `JspTester` copies the webapp to a temp dir, then `PageScanner` (this
+  project's parser) finds every taglib and the tags/EL functions used per uri. A uri that
+  `TagLibraryResolver` (classpath JARs from `ClassPath`, which follows Surefire's manifest-only
+  JAR) can't resolve, or that was passed to `mockTaglib`, gets a mock from `MockLibraries`.
+- **Mocks:** the generated TLD maps each tag to its own generated `MockTag` subclass. Classic tag
+  handlers never learn their own name, and tag files can't hold scriptlets in their bodies, so
+  per-tag subclasses are the way to know the tag's name with full body support. They are compiled
+  with `javax.tools` (or Jasper's ECJ on a JRE) into `WEB-INF/classes`. Mocked EL functions are
+  static methods in generated classes. A mock TLD goes in `WEB-INF/orw-mocks/`, because Tomcat
+  scans `WEB-INF` before JARs, so the mock wins; for a path-style uri it goes at that path. A real
+  WEB-INF TLD with the same uri is deleted from the copy.
+- **Requests:** Tomcat runs on a random port with `RenderServlet` at `/__orw_render__`. A render is
+  an HTTP request carrying the parameters, with an `X-Orw-Render` header id. The servlet looks up
+  the `RenderRequest`, sets the attributes and mock behaviors (keyed by `MockTag.key(uri, name)`),
+  and forwards to the page. Its response wrapper disables URL rewriting, since a cookie-less client
+  would otherwise get random `;jsessionid=` in URLs and unstable snapshots. Errors become 500s
+  carrying the stack trace.
+- **Jasper defaults:** `jspOption` sets JSP servlet init params, applied at `CONFIGURE_START` once
+  the default `jsp` wrapper exists. The default is `strictQuoteEscaping=false`, because legacy
+  containers accepted `value="<%= m.get("x") %>"` and Tomcat 8.5+ rejects it.
+- **Fixtures:** `Fixtures` reads JSON with Jackson. `"@class"` objects are converted with field
+  visibility, so model beans need no setters, and nested types come from field types. `"@value"`
+  converts a scalar. Unknown properties fail. Decimals stay exact
+  (`USE_BIG_DECIMAL_FOR_FLOATS`, and `STRIP_TRAILING_BIGDECIMAL_ZEROES` off).
+- **Expected output** is `<name>.expected.html` next to `<name>.json`. `-Dorw.tester.update=true`
+  (Surefire passes it to the forked JVM) writes the actual output instead of comparing. A missing
+  expected file fails, so CI never accepts new snapshots silently.
+- **Thymeleaf readiness:** `RenderRequest` and fixtures are engine-neutral, and `Fixtures.verify`
+  takes any `Renderer`. That is the seam for a Thymeleaf renderer reusing the same fixtures and
+  snapshots.
+
+`tester-example` behaves like a real Struts 1 app: its `web.xml` starts `ActionServlet` with
+`struts-config.xml`, so `html:`/`bean:` tags render for real. The in-house `acme` taglib
+(`http://acme.example/tags`) has no implementation and is mocked automatically. Its snapshots in
+`src/test/fixtures` were generated with `-Dorw.tester.update=true` and reviewed by hand.

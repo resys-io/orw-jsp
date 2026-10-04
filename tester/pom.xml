@@ -11,4 +11,58 @@
 
   <artifactId>resys-orw-jsp-tester</artifactId>
 
+  <properties>
+    <!--
+      Tomcat 9 (javax.servlet), not 10+ (jakarta.servlet): the pages under test belong to legacy
+      applications (e.g. Struts 1) whose tag libraries are compiled against javax.servlet.
+    -->
+    <tomcat.version>9.0.109</tomcat.version>
+    <!-- The version rewrite-core (via the parser) already brings in. -->
+    <jackson.version>2.21.6</jackson.version>
+  </properties>
+
+  <dependencies>
+    <!-- Embedded Tomcat compiles (Jasper) and runs the pages. -->
+    <dependency>
+      <groupId>org.apache.tomcat.embed</groupId>
+      <artifactId>tomcat-embed-core</artifactId>
+      <version>${tomcat.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.tomcat.embed</groupId>
+      <artifactId>tomcat-embed-jasper</artifactId>
+      <version>${tomcat.version}</version>
+    </dependency>
+
+    <!-- Scans the pages for the tags of libraries to mock. -->
+    <dependency>
+      <groupId>io.resys.orw</groupId>
+      <artifactId>resys-orw-jsp-parser</artifactId>
+    </dependency>
+
+    <!-- Fixture files. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+
+    <!-- Assertion failures with expected/actual for IDE diffs, and dynamic tests per fixture. -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>3.27.7</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>

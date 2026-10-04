@@ -1,0 +1,4 @@
+<div class="header">
+  <h1><acme:message key="orders.title"/></h1>
+  <c:if test="${not empty sessionScope.user}"><span class="user">${sessionScope.user.name}</span></c:if>
+</div>

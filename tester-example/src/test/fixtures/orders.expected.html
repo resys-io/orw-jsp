@@ -1,0 +1,41 @@
+
+
+
+
+
+
+
+<html>
+<body>
+<div class="header">
+  <h1><acme:message key="orders.title"></acme:message></h1>
+  <span class="user">Clerk</span>
+</div>
+
+
+<h2>Orders (2)</h2>
+<table>
+
+  <tr>
+    <td>1001</td>
+    <td>Ann (VIP)</td>
+    <td>19.90</td>
+    <td>2 lines</td>
+  </tr>
+
+  <tr>
+    <td>1002</td>
+    <td>Bob</td>
+    <td>5.00</td>
+    <td>0 lines</td>
+  </tr>
+
+</table>
+
+<form name="searchForm" method="post" action="/orders/search.do">
+  <input type="text" name="q" value="boots">
+  <input type="submit" value="Search">
+</form>
+<acme:footer year="2026"></acme:footer>
+</body>
+</html>

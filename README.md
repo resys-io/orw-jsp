@@ -9,8 +9,10 @@ plus recipes that clean up and analyze JSP pages.
 |---|---|---|
 | `parser` | `io.resys.orw:resys-orw-jsp-parser` | The JSP syntax tree, `JspParser`, visitors, printer, and the `Assertions.jsp(...)` test helper |
 | `receipes` | `io.resys.orw:resys-orw-jsp-receipes` | The recipes described below |
+| `tester` | `io.resys.orw:resys-orw-jsp-tester` | Renders pages with embedded Tomcat 9 for tests, with fixtures and tag mocking, to check that a migration keeps the output the same (see [Testing pages](#testing-pages-the-tester)) |
+| `tester-example` | `io.resys.orw:resys-orw-jsp-tester-example` | A small Struts 1 web application tested with the tester; an example and a testbed |
 
-Both are version `1.0-SNAPSHOT`, built for Java 21 against OpenRewrite 8.90.4.
+All are version `1.0-SNAPSHOT`, built for Java 21 against OpenRewrite 8.90.4.
 
 ```sh
 mvn clean install
@@ -639,6 +641,148 @@ so JSTL tags keep using the `var=` rule.
 - **Fragments may leave markup open or close markup they didn't open.** A fragment is a `.jspf`
   file, or any file another page in the same run includes. Those two balance problems aren't
   reported for fragments; everything else is.
+
+## Testing pages: the tester
+
+The `tester` module renders JSP pages the way the application's servlet container would, so you
+can check that a migration doesn't change what a page outputs. It works in four steps:
+
+1. Write fixtures that describe a page's inputs.
+2. Render them with the original pages and save the output as each fixture's *expected output*
+   (a snapshot).
+3. Migrate the pages.
+4. Render the fixtures again and compare against the saved snapshots.
+
+The same fixtures are meant to check the Thymeleaf templates later. `tester-example` is a working
+example.
+
+```xml
+<dependency>
+  <groupId>io.resys.orw</groupId>
+  <artifactId>resys-orw-jsp-tester</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <scope>test</scope>
+</dependency>
+```
+
+```java
+class OrdersPageTest {
+    static final JspTester tester = JspTester.builder()
+            .webapp(Path.of("src/main/webapp"))
+            .build();
+
+    @AfterAll
+    static void stop() { tester.close(); }
+
+    @TestFactory                                   // one test per src/test/fixtures/**/*.json
+    Stream<DynamicTest> fixtures() { return tester.fixtureTests(Path.of("src/test/fixtures")); }
+
+    @Test
+    void programmatically() {                     // or render directly
+        String html = tester.renderOk(RenderRequest.page("/WEB-INF/views/orders.jsp")
+                .param("q", "boots")
+                .requestAttribute("orders", List.of())
+                .mock("acme:footer", MockBehavior.empty()));
+    }
+}
+```
+
+### How pages are rendered
+
+- **Tomcat 9 (Jasper), on purpose.** The tester runs embedded **Tomcat 9**, because Struts 1 and
+  similar libraries are built on `javax.servlet`, which Tomcat 10+ (`jakarta.servlet`) can't load.
+  On first use it copies the web application to a temporary directory and starts Tomcat on a free
+  port; `close()` stops it.
+- **The application starts as configured.** Its `web.xml` is used as is, so Struts' `ActionServlet`
+  starts with its `struts-config.xml`, and Struts tags such as `html:form` and `bean:message` work
+  for real.
+- **Classes come from the test classpath:** model beans, tag libraries (JSTL, Struts), and so on.
+  Tag libraries are found the way Tomcat finds them.
+- **The request is real.** Parameters are sent as real HTTP request parameters, and the locale as
+  `Accept-Language`. Request, session and application attributes are put in place before the page
+  runs.
+- **A failure doesn't throw.** If a page fails to compile or throws an exception, `render` returns
+  status 500 with the error. `renderOk` and fixture tests fail with that error.
+- **URLs are left as written.** A test client has no session cookie, so Tomcat would otherwise add
+  a random `;jsessionid=…` to every URL a page builds.
+
+**Jasper options.** Set them with `jspOption(name, value)`. By default the tester sets
+`strictQuoteEscaping=false`, because older containers accepted
+`value="<%= map.get("x") %>"`, which Tomcat 8.5 and later reject.
+
+### Mocking tag libraries
+
+A tag library the pages declare but whose TLD can't be found is mocked automatically, for example
+an in-house library whose implementation isn't on the test classpath. To mock a library that is
+available, for example one that needs a database, use `mockTaglib(uri)`.
+
+The tester finds every tag and EL function the pages use from a mocked library, using this
+project's parser, and generates a TLD and handler classes for them. A mocked tag accepts any
+attributes and any body content, scriptlets included. Its output follows its `MockBehavior`:
+
+| Mode | Output |
+|---|---|
+| `PLACEHOLDER` (default) | The tag itself, with its evaluated attributes, around its body: `<acme:panel title="T">…</acme:panel>`. This makes mocks visible in snapshots. |
+| `BODY` | Only its body |
+| `EMPTY` | Nothing |
+| `TEXT` | Fixed text instead of the tag |
+
+A mock can also set `variables`, page attributes for tags that define variables. A mocked EL
+function returns its call as text, e.g. `acme:upper(Ann)`.
+
+### Fixtures
+
+A fixture is a JSON file describing a page's inputs. Its expected output sits next to it:
+`orders.json` goes with `orders.expected.html`.
+
+```json
+{
+  "page": "/WEB-INF/views/orders.jsp",
+  "method": "GET",
+  "locale": "fi-FI",
+  "parameters": { "q": "boots", "ids": ["1", "2"] },
+  "request": {
+    "orders": [
+      { "@class": "com.acme.shop.Order", "id": 1001, "total": 19.90,
+        "customer": { "name": "Ann", "vip": true } }
+    ],
+    "title": "Orders"
+  },
+  "session": { "user": { "@class": "com.acme.shop.Customer", "name": "Clerk" } },
+  "application": {},
+  "mocks": { "acme:footer": { "mode": "TEXT", "text": "<footer/>" } },
+  "compare": "WHITESPACE"
+}
+```
+
+- **Attribute values with `"@class"`** become instances of that class, so scriptlet casts like
+  `(Order) request.getAttribute(…)` work. The other properties fill its fields, which need no
+  setters, and nested objects get their types from the field types. Use `"@value"` to convert a
+  single value instead: `{"@class": "java.util.Date", "@value": "2024-01-31T12:00:00Z"}`.
+- **Other values:** objects become `Map`s and arrays `List`s, which EL and JSTL treat as beans and
+  collections. Decimals stay exact `BigDecimal`s, so `19.90` stays `19.90`.
+- **Mistakes fail clearly:** a misspelled property or a class that isn't on the test classpath
+  fails with a clear message.
+- **`mocks`** are keyed by tag as written on the page (`prefix:name`).
+- **`compare`:** `WHITESPACE` (default) treats any run of whitespace as one space and ignores
+  whitespace between tags, since migrations shift whitespace but shouldn't change content.
+  `EXACT` compares character by character.
+
+**Creating and updating expected output.** Run with `-Dorw.tester.update=true`:
+
+```sh
+mvn test -Dorw.tester.update=true
+```
+
+or set `JspTester.builder().updateFixtures(true)`. Each fixture's output is then written as its
+expected output instead of being compared. **Review the generated files before committing them.**
+Without the flag, a fixture with no expected output fails and says how to create it, so a CI run
+never accepts a new snapshot silently. A mismatch fails with expected and actual output, which
+IDEs show as a diff.
+
+**Other engines.** Fixtures and `RenderRequest`s don't depend on JSP. `JspTester` implements the
+`Renderer` interface, and `Fixtures.verify(renderer, fixture, update)` works with any renderer, so
+a Thymeleaf renderer can check the migrated templates against the same fixtures and snapshots.
 
 ## Writing tests
 
