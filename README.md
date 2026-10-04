@@ -209,6 +209,96 @@ It counts these categories of constructs:
   referenced by two different URIs, such as an old `/WEB-INF/struts-html.tld` path and
   `http://struts.apache.org/tags-html`, shows up as two libraries.
 
+### `FindModelAttributes`
+
+An analysis recipe that documents what each page expects to be given: the model attributes a
+controller must provide, plus request parameters and Tiles attributes. Where the page reveals it,
+it also records each input's type and the property paths the page reads from it. These paths are
+what Spring MVC model classes need. **It changes nothing.** It has no options and fills one data
+table, `JspModelAttributes`, with one row per page and input:
+
+| Column | Description |
+|---|---|
+| `sourcePath` | The page |
+| `scope` | `REQUEST`, `SESSION` or `APPLICATION` when read from that scope. `ANY` when read from whichever scope has it (EL, `findAttribute`, Struts tags without `scope`). `PARAMETER` for a request parameter, `TILES` for a Tiles attribute. |
+| `name` | The attribute or parameter name. `(non-literal key: Constants.X)` when Java code reads it by a constant. |
+| `type` | The type, when the page reveals it. Simple names are fully qualified using the page's `import`s. |
+| `properties` | Property paths read from it, with `: Type` where known, e.g. `address.city, orders[]: com.acme.Order, orders[].total`. `[]` means an element of a collection. |
+| `readBy` | How it's read, e.g. `EL`, `request.getAttribute`, `bean:write`, `struts-config form bean for action /save` |
+| `files` | Where it's read: the page and/or files it includes |
+
+For example, this page:
+
+```jsp
+<%@ page import="java.util.List, com.acme.User, com.acme.Order" %>
+<%
+    User user = (User) request.getAttribute("user");
+    List<Order> orders = (List<Order>) session.getAttribute("orders");
+    for (Order o : orders) { out.print(o.getTotal()); }
+%>
+${user.address.city}
+<c:forEach var="line" items="${cart.lines}">${line.product.name}</c:forEach>
+```
+
+produces these rows:
+
+| scope | name | type | properties |
+|---|---|---|---|
+| `REQUEST` | `user` | `com.acme.User` | `address.city` |
+| `SESSION` | `orders` | `java.util.List<com.acme.Order>` | `[]: com.acme.Order, [].total` |
+| `ANY` | `cart` | | `lines, lines[], lines[].product.name` |
+
+**What it recognizes**
+
+- **Java code**
+  - Reads: `request`/`session`/`application`/`getServletContext()`/`request.getSession()` with
+    `.getAttribute("x")`, `pageContext.findAttribute("x")` (and `getAttribute` with a scope
+    constant), and `request.getParameter("p")`/`getParameterValues("p")`.
+  - The type comes from the cast, or from the declared type of the variable the value is
+    assigned to.
+  - Property paths come from getter chains on that variable (`u.getAddress().getCity()`),
+    for-each loops over it, and typed assignments (`String n = u.getName();` gives `name: String`).
+- **EL**
+  - Root names and paths: `${user.address.city}`, `${user['name']}`, `${requestScope.x}`,
+    `${sessionScope.x}`, `${param.p}`.
+  - `<c:forEach var items>` makes `var` stand for the elements of `items`.
+- **Struts 1 tags**
+  - `name`/`property`/`scope` on `bean:write`, `bean:define`, `bean:size`, the `logic:`
+    comparison and presence tags, and `logic:iterate` (its `type` gives the element type).
+  - `logic:* parameter="p"` reads a request parameter.
+  - An `html:` input field's `property` is a property of the enclosing `<html:form>`'s form bean,
+    or of the bean named by its `name`. `html:options collection` and `html:optionsCollection`
+    are covered too.
+  - Struts taglibs are recognized by URI, including old `/WEB-INF/struts-*.tld` paths.
+- **Struts form beans** (see below)
+- **Tiles:** `tiles:getAsString`, `tiles:insert attribute`, `tiles:useAttribute`,
+  `tiles:importAttribute`.
+- **Standard actions:** `<jsp:useBean>` in request, session or application scope (with its
+  `class`/`type`), and `<jsp:getProperty>`/`<jsp:setProperty>`.
+
+**Not counted as inputs:** names the page defines before using them, such as `<c:set var>`,
+`<bean:define value>`, iteration variables, page-scoped beans, and attributes the page sets with
+`setAttribute`. Reads inside statically included files count as reads of the including page.
+
+**Struts form beans.** Parse `struts-config.xml` together with the pages, using OpenRewrite's XML
+parser. `<html:form action="/save.do">` then resolves to the attribute name, scope (Struts'
+default is `session`), type and, for a `DynaActionForm`, typed properties of its form bean:
+
+```java
+List<SourceFile> sources = new ArrayList<>(jspSources);
+sources.addAll(XmlParser.builder().build()
+        .parse(List.of(project.resolve("src/main/webapp/WEB-INF/struts-config.xml")), project, ctx)
+        .toList());
+RecipeRun run = new FindModelAttributes().run(new InMemoryLargeSourceSet(sources), ctx);
+List<JspModelAttributes.Row> inputs = run.getDataTableRows(JspModelAttributes.class);
+```
+
+Without `struts-config.xml`, a form bean is listed as `(form bean of action /save.do)`, with the
+properties its fields read.
+
+**Limitations:** this is text matching, not a real Java or EL parser, so unusual code can be
+missed. A type is only as precise as the page states it.
+
 ### `FindJspProblems`
 
 An analysis recipe that finds structural and readability problems. **It changes nothing.** It

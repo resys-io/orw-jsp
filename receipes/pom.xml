@@ -36,6 +36,11 @@
       <artifactId>resys-openrewrite-jsp-parser</artifactId>
       <groupId>io.resys.openrewrite</groupId>
     </dependency>
+    <!-- Reads struts-config.xml (form beans, action mappings) for FindModelAttributes. -->
+    <dependency>
+      <groupId>org.openrewrite</groupId>
+      <artifactId>rewrite-xml</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>

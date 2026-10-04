@@ -191,6 +191,23 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   "anything from this package" is used without a real type checker), and usage is a whole-word
   match on the simple name, not a resolved type reference — same "can only false-positive toward
   keeping, never toward deleting" safety property as `RemoveUnusedTaglibs`.
+- **`FindModelAttributes`** — an analysis-only `ScanningRecipe<StrutsConfig>` that lists each page's
+  inputs in `table.JspModelAttributes`: model attributes, request parameters and Tiles attributes,
+  with type and property paths where known. Its scanner collects the form beans and action
+  mappings of any `struts-config.xml` (an `Xml.Document` with root `struts-config`) parsed
+  alongside the pages. That is why the module depends on `rewrite-xml` at compile scope, and why
+  the scanner is a plain `TreeVisitor` rather than a `JspVisitor`. The logic is in
+  `ModelAttributeCollector`: a single walk in document order, including included files.
+  - **Aliases:** page-local names (`<c:forEach var>`, `<logic:iterate id>`, `<bean:define id>`, Java
+    variables assigned from `getAttribute`) are stored as an *alias* (target input + property path
+    prefix), so reads through them become property paths on the input (`orders[].total`, where
+    `[]` is a collection element).
+  - **Scopes:** an `ANY`-scope read merges into (or is upgraded to) a specific-scope read of the
+    same name.
+  - **Java reads:** Java property reads through aliases are resolved after the walk, over all of
+    the page's Java code together, since getters often come in a later scriptlet. Attributes the
+    page `setAttribute`s itself stop being inputs from that point on.
+  - **Type names:** simple type names are qualified with the page's `<%@ page import %>`s.
 - **`JspInventory`** — an analysis-only `ScanningRecipe` for migration planning. It fills three data
   tables: `table.JspConstructTotals` (written in `generate()`, after every page has been scanned),
   `table.JspConstructUsage` and `table.JspPageInventory` (both written by the scanner, one page at a
