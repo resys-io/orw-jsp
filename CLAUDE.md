@@ -113,10 +113,16 @@ includes it. (The included file is still a normal source file of its own if it's
 parse.) Targets are looked up first among the inputs of the same `parseInputs` call, so tests can
 supply them as sibling `jsp(..., spec -> spec.path("includes/x.jsp"))` sources, and then on disk.
 Relative paths resolve against the including file's directory, and `/`-prefixed ones against the
-nearest ancestor containing `WEB-INF`. A missing, unparseable, or recursive include leaves
-`includedFile` as `null` instead of failing the page. Recipes that hand-walk node lists (as both
-current recipes do) must explicitly descend into `getIncludedFile().getNodes()` to see that
-content: both usage scans do, and both removal passes deliberately don't.
+nearest ancestor containing `WEB-INF`. A missing, unreadable, or unparseable include leaves
+`includedFile` as `null` and puts an `org.openrewrite.ParseWarning` marker on the directive saying
+why, instead of failing the page (`ParseWarning` is never printed into the source). A recursive
+include is also `null`, but has no marker, because its content is already in the tree. Recipes that
+hand-walk node lists (as both current recipes do) must explicitly descend into
+`getIncludedFile().getNodes()` to see that content: both usage scans do, and both removal passes
+deliberately don't. Any recipe that decides something is "unused" must also skip a page with an
+unresolved include anywhere in it (including nested inside an included file), because it can't
+see what that file uses. Call `UnresolvedIncludes.mustSkip(document, recipeName)` at the top of
+`visitDocument`; it logs one `System.Logger` WARNING per unresolved include.
 
 **Known, documented limitations** (see the class Javadoc on `Jsp` and `JspParser` for details):
 - Scriptlet/declaration/expression code is terminated by the first unescaped `%>`; a `%>` inside a

@@ -2,9 +2,13 @@ package io.resys.openrewrite.jsp;
 
 import io.resys.openrewrite.jsp.tree.Jsp;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.openrewrite.ExecutionContext;
+import org.openrewrite.ParseWarning;
 import org.openrewrite.test.RewriteTest;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -77,12 +81,48 @@ class JspIncludeTest implements RewriteTest {
     }
 
     @Test
-    void unresolvableIncludeIsLeftEmpty() {
+    void unresolvableIncludeIsLeftEmptyWithWarning() {
         rewriteRun(
                 jsp(
                         "<%@ include file=\"does/not/exist.jsp\" %>",
-                        spec -> spec.path("index.jsp").afterRecipe(document ->
-                                assertThat(includeDirective(document).getIncludedFile()).isNull())
+                        spec -> spec.path("index.jsp").afterRecipe(document -> {
+                            Jsp.Directive include = includeDirective(document);
+                            assertThat(include.getIncludedFile()).isNull();
+                            assertThat(include.getMarkers().findFirst(ParseWarning.class))
+                                    .hasValueSatisfying(w -> assertThat(w.getMessage())
+                                            .isEqualTo("Included file 'does/not/exist.jsp' not found"));
+                        })
+                )
+        );
+    }
+
+    @Test
+    void unparseableIncludeIsLeftEmptyWithWarning(@TempDir Path dir) throws IOException {
+        // On disk rather than a sibling source, which would itself (correctly) fail to parse.
+        Files.writeString(dir.resolve("broken.jspf"), "<% unterminated");
+        rewriteRun(
+                jsp(
+                        "<%@ include file=\"broken.jspf\" %>",
+                        spec -> spec.path(dir.resolve("index.jsp")).afterRecipe(document -> {
+                            Jsp.Directive include = includeDirective(document);
+                            assertThat(include.getIncludedFile()).isNull();
+                            assertThat(include.getMarkers().findFirst(ParseWarning.class))
+                                    .hasValueSatisfying(w -> assertThat(w.getMessage())
+                                            .startsWith("Included file 'broken.jspf' could not be parsed"));
+                        })
+                )
+        );
+    }
+
+    @Test
+    void includeIsResolvedFromDisk(@TempDir Path dir) throws IOException {
+        Files.createDirectories(dir.resolve("includes"));
+        Files.writeString(dir.resolve("includes/page_name.jsp"), "${pageName}");
+        rewriteRun(
+                jsp(
+                        "<%@ include file=\"includes/page_name.jsp\" %>",
+                        spec -> spec.path(dir.resolve("index.jsp")).afterRecipe(document ->
+                                assertThat(includeDirective(document).getIncludedFile()).isNotNull())
                 )
         );
     }
@@ -95,7 +135,9 @@ class JspIncludeTest implements RewriteTest {
                         spec -> spec.path("a.jsp").afterRecipe(document -> {
                             Jsp.IncludedFile b = includeDirective(document).getIncludedFile();
                             assertThat(b).isNotNull();
-                            assertThat(((Jsp.Directive) b.getNodes().get(0)).getIncludedFile()).isNull();
+                            Jsp.Directive backToA = (Jsp.Directive) b.getNodes().get(0);
+                            assertThat(backToA.getIncludedFile()).isNull();
+                            assertThat(backToA.getMarkers().findFirst(ParseWarning.class)).isEmpty();
                         })
                 ),
                 jsp("<%@ include file=\"a.jsp\" %>", spec -> spec.path("b.jsp"))

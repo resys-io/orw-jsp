@@ -66,6 +66,9 @@ public class RemoveUnusedImports extends Recipe {
         return new JspIsoVisitor<ExecutionContext>() {
             @Override
             public Jsp.Document visitDocument(Jsp.Document document, ExecutionContext ctx) {
+                if (UnresolvedIncludes.mustSkip(document, RemoveUnusedImports.class.getSimpleName())) {
+                    return document;
+                }
                 String javaCode = collectJavaCode(document.getNodes());
                 Set<String> seenImports = new LinkedHashSet<>();
                 return document.withNodes(rewriteNodes(document.getNodes(), javaCode, seenImports));

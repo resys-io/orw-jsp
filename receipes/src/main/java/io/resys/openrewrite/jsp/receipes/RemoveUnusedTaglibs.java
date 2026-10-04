@@ -57,6 +57,9 @@ public class RemoveUnusedTaglibs extends Recipe {
         return new JspIsoVisitor<ExecutionContext>() {
             @Override
             public Jsp.Document visitDocument(Jsp.Document document, ExecutionContext ctx) {
+                if (UnresolvedIncludes.mustSkip(document, RemoveUnusedTaglibs.class.getSimpleName())) {
+                    return document;
+                }
                 Set<String> unusedPrefixes = findUnusedTaglibPrefixes(document);
                 if (unusedPrefixes.isEmpty()) {
                     return document;

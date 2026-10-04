@@ -44,9 +44,10 @@ import static org.openrewrite.Tree.randomId;
  * context-relative one (leading {@code /}) against the web application root, taken to be the
  * nearest ancestor directory containing {@code WEB-INF} (or, failing that, the nearest ancestor
  * under which the target exists). The target is looked up first among the inputs of the same
- * {@link #parseInputs} call, then on disk. An include that cannot be resolved, cannot be parsed, or
- * would include itself recursively is left with a {@code null} included file rather than failing
- * the including page.
+ * {@link #parseInputs} call, then on disk. An include that cannot be found, read, or parsed is left
+ * with a {@code null} included file and a {@link ParseWarning} marker on the directive explaining
+ * why, rather than failing the including page. A recursive include is also left {@code null}, but
+ * without a warning: the file it names is already part of the tree.
  * <p>
  * Known limitations (documented rather than silently mishandled):
  * <ul>
@@ -226,15 +227,22 @@ public class JspParser implements Parser {
             throw new JspParsingException("Malformed directive <%@ " + name + " ...>: expected %>");
         }
         sc.advance(2);
+        Markers markers = Markers.EMPTY;
         Jsp.IncludedFile includedFile = null;
         if ("include".equals(name)) {
+            String file = "";
             for (Jsp.Attribute attribute : attributes) {
                 if ("file".equals(attribute.getName())) {
-                    includedFile = sc.file.includes().parse(sc.file, attribute.getValue().getValue());
+                    file = attribute.getValue().getValue();
                 }
             }
+            try {
+                includedFile = sc.file.includes().parse(sc.file, file);
+            } catch (UnresolvedIncludeException e) {
+                markers = markers.add(new ParseWarning(randomId(), e.getMessage()));
+            }
         }
-        return new Jsp.Directive(randomId(), "", Markers.EMPTY, beforeName, name, attributes, beforeEnd, includedFile);
+        return new Jsp.Directive(randomId(), "", markers, beforeName, name, attributes, beforeEnd, includedFile);
     }
 
     private static Jsp.Declaration parseDeclaration(Scanner sc) {
@@ -488,14 +496,22 @@ public class JspParser implements Parser {
             return base.resolve(path).normalize();
         }
 
-        Jsp.@Nullable IncludedFile parse(FileContext including, String file) {
+        /**
+         * @return the parsed included file, or {@code null} if it is already on the include chain
+         * (a recursive include, whose content is therefore already part of the tree).
+         * @throws UnresolvedIncludeException if the included file can't be found, read, or parsed.
+         */
+        Jsp.@Nullable IncludedFile parse(FileContext including, String file) throws UnresolvedIncludeException {
             Path target = resolve(including.absolutePath(), file);
-            if (target == null || including.chain().contains(target)) {
+            if (target == null) {
+                throw new UnresolvedIncludeException("Included file '" + file + "' not found");
+            }
+            if (including.chain().contains(target)) {
                 return null;
             }
             String text = read(target);
             if (text == null) {
-                return null;
+                throw new UnresolvedIncludeException("Included file '" + file + "' could not be read");
             }
             Set<Path> chain = new HashSet<>(including.chain());
             chain.add(target);
@@ -503,7 +519,8 @@ public class JspParser implements Parser {
             try {
                 nodes = parseNodes(new Scanner(text, new FileContext(this, target, chain)), null);
             } catch (JspParsingException e) {
-                return null;
+                throw new UnresolvedIncludeException("Included file '" + file + "' could not be parsed: " +
+                                                      e.getMessage());
             }
             Path sourcePath = target.startsWith(base) ? base.relativize(target) : target;
             return new Jsp.IncludedFile(randomId(), Markers.EMPTY, sourcePath, unmodifiableList(nodes));
@@ -560,6 +577,16 @@ public class JspParser implements Parser {
             } catch (IOException | UncheckedIOException e) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * An include whose target can't be embedded. Recorded as a {@link ParseWarning} on the include
+     * directive rather than failing the including page.
+     */
+    private static final class UnresolvedIncludeException extends Exception {
+        UnresolvedIncludeException(String message) {
+            super(message);
         }
     }
 

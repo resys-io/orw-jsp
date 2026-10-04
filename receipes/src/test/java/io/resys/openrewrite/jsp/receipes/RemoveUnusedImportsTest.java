@@ -242,4 +242,18 @@ class RemoveUnusedImportsTest implements RewriteTest {
                 jsp("<%= new Date() %>", spec -> spec.path("includes/date.jspf"))
         );
     }
+
+    @Test
+    void skipsPageWithUnresolvedInclude() {
+        // Date may well be used by the missing file, so nothing may be removed.
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page import="java.util.Date" %>
+                        <%@ include file="includes/missing.jspf" %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                )
+        );
+    }
 }

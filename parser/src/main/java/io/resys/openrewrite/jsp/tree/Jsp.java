@@ -204,7 +204,9 @@ public interface Jsp extends Tree {
         /**
          * For an {@code <%@ include file="..." %>} directive whose target could be resolved, the
          * parsed content of the included file; {@code null} for every other directive, and for an
-         * include whose target could not be found (or would include itself recursively).
+         * include whose target could not be found, read, or parsed (in which case the directive
+         * carries an {@link org.openrewrite.ParseWarning} marker saying why) or would include itself
+         * recursively (no marker - its content is already part of the tree).
          * <p>
          * This is a read-only view: it is never printed (the directive prints as itself, not as the
          * included text), and {@link JspVisitor} visits it but discards any changes made to it, so a

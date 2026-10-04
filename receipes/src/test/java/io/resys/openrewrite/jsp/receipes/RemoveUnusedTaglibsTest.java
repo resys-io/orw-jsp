@@ -152,4 +152,32 @@ class RemoveUnusedTaglibsTest implements RewriteTest {
                 jsp("<h1><c:out value=\"${pageName}\"/></h1>", spec -> spec.path("includes/page_name.jsp"))
         );
     }
+
+    @Test
+    void skipsPageWithUnresolvedInclude() {
+        // "unused" may well be used by the missing file, so nothing may be removed.
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ taglib prefix="unused" uri="http://example.com/unused" %>
+                        <%@ include file="includes/missing.jsp" %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                )
+        );
+    }
+
+    @Test
+    void skipsPageWhoseIncludedFileHasUnresolvedInclude() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ taglib prefix="unused" uri="http://example.com/unused" %>
+                        <%@ include file="includes/outer.jspf" %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp("<%@ include file=\"missing.jspf\" %>", spec -> spec.path("includes/outer.jspf"))
+        );
+    }
 }
