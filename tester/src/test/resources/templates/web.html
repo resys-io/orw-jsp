@@ -1,0 +1,6 @@
+<p class="greeting" th:text="#{greeting}">greeting</p>
+<p class="q" th:text="${param.q}">q</p>
+<a th:href="@{/orders(page=${param.page})}">orders</a>
+<p class="version" th:text="${application.version}">version</p>
+<p class="lang" th:text="${#locale.language}">lang</p>
+<p class="user" th:if="${session.user != null}" th:text="${session.user.name}">user</p>

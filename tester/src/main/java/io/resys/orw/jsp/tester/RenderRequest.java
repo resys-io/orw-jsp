@@ -21,6 +21,7 @@ public final class RenderRequest {
     private final Map<String, Object> sessionAttributes = new LinkedHashMap<>();
     private final Map<String, Object> applicationAttributes = new LinkedHashMap<>();
     private Locale locale = Locale.ENGLISH;
+    private String template;
     private final Map<String, MockBehavior> mocks = new LinkedHashMap<>();
 
     private RenderRequest(String page) {
@@ -59,6 +60,15 @@ public final class RenderRequest {
         return this;
     }
 
+    /**
+     * The template a page was migrated to (e.g. {@code orders} for Thymeleaf), when a renderer's
+     * own mapping from the page path doesn't give it.
+     */
+    public RenderRequest template(String template) {
+        this.template = template;
+        return this;
+    }
+
     public RenderRequest locale(Locale locale) {
         this.locale = locale;
         return this;
@@ -94,6 +104,13 @@ public final class RenderRequest {
 
     public Map<String, Object> getApplicationAttributes() {
         return Collections.unmodifiableMap(applicationAttributes);
+    }
+
+    /**
+     * @return the template set with {@link #template(String)}, or {@code null}.
+     */
+    public String getTemplate() {
+        return template;
     }
 
     public Locale getLocale() {

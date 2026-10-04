@@ -56,7 +56,9 @@ import java.util.stream.Stream;
  * <p>
  * Mocks are keyed by tag as written on the page; {@code mode} is {@code PLACEHOLDER} (the default),
  * {@code BODY}, {@code EMPTY}, or {@code TEXT} (with {@code text}); {@code variables} are page
- * attributes the tag sets. {@code compare} is {@code WHITESPACE} (the default) or {@code EXACT}.
+ * attributes the tag sets ({@code CUSTOM} mocks are only possible in code). {@code compare} is
+ * {@code WHITESPACE} (the default), {@code EXACT}, or {@code HTML}. {@code template} optionally names
+ * the template the page was migrated to, for {@link ThymeleafTester}.
  * <p>
  * Expected output is created and updated, rather than compared, when updating is on: the
  * {@value #UPDATE_PROPERTY} system property ({@code -Dorw.tester.update=true}), or
@@ -145,23 +147,28 @@ public final class Fixtures {
                                      rendered.status() + ":\n" + rendered.body());
         }
         Path expectedPath = expectedOutput(fixturePath);
+        boolean reference = renderer.writesExpectedOutput();
         try {
-            if (update) {
+            if (update && reference) {
                 Files.writeString(expectedPath, rendered.body(), StandardCharsets.UTF_8);
                 addMocks(fixturePath, renderer.unconfiguredMocks(fixture.request()));
                 return;
             }
             if (!Files.exists(expectedPath)) {
-                throw new AssertionError(fixturePath + ": no expected output " + expectedPath.getFileName() +
-                                         " yet. Run with -D" + UPDATE_PROPERTY + "=true to create it from the current " +
-                                         "output, and review it.");
+                throw new AssertionError(fixturePath + ": no expected output " + expectedPath.getFileName() + " yet. " +
+                                         (reference ? "Run with -D" + UPDATE_PROPERTY + "=true to create it from the " +
+                                                      "current output, and review it." :
+                                                 "Create it with the reference renderer (JspTester) and -D" +
+                                                 UPDATE_PROPERTY + "=true."));
             }
             String expected = Files.readString(expectedPath, StandardCharsets.UTF_8);
-            Comparison comparison = fixture.comparison();
+            Comparison comparison = renderer.comparison(fixture.comparison());
             if (!comparison.normalize(expected).equals(comparison.normalize(rendered.body()))) {
                 throw new AssertionFailedError(fixturePath + ": the output differs from " + expectedPath.getFileName() +
-                                               " (" + comparison + " comparison). Run with -D" + UPDATE_PROPERTY +
-                                               "=true to accept it.", expected, rendered.body());
+                                               " (" + comparison + " comparison). " +
+                                               (reference ? "Run with -D" + UPDATE_PROPERTY + "=true to accept it." :
+                                                       "The migrated template doesn't render what the original page did."),
+                        comparison.display(expected), comparison.display(rendered.body()));
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -220,6 +227,9 @@ public final class Fixtures {
         RenderRequest request = RenderRequest.page(page);
         if (text(root, "method") != null) {
             request.method(text(root, "method"));
+        }
+        if (text(root, "template") != null) {
+            request.template(text(root, "template"));
         }
         if (text(root, "locale") != null) {
             request.locale(Locale.forLanguageTag(text(root, "locale")));

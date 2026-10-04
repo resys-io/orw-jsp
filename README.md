@@ -9,7 +9,7 @@ plus recipes that clean up and analyze JSP pages.
 |---|---|---|
 | `parser` | `io.resys.orw:resys-orw-jsp-parser` | The JSP syntax tree, `JspParser`, visitors, printer, and the `Assertions.jsp(...)` test helper |
 | `receipes` | `io.resys.orw:resys-orw-jsp-receipes` | The recipes described below |
-| `tester` | `io.resys.orw:resys-orw-jsp-tester` | Renders pages with embedded Tomcat 10.1 (Jakarta EE) for tests, with fixtures and tag mocking, to check that a migration keeps the output the same (see [Testing pages](#testing-pages-the-tester)) |
+| `tester` | `io.resys.orw:resys-orw-jsp-tester` | Renders pages with embedded Tomcat 10.1 (Jakarta EE), and the Thymeleaf templates they were migrated to with Spring MVC, for tests, with fixtures and tag mocking, to check that a migration keeps the output the same (see [Testing pages](#testing-pages-the-tester)) |
 | `tester-example` | `io.resys.orw:resys-orw-jsp-tester-example` | A small Struts 1 (weblegacy 1.5, Jakarta EE) web application tested with the tester; an example and a testbed |
 
 All are version `1.0-SNAPSHOT`, built for Java 21 against OpenRewrite 8.90.4.
@@ -805,7 +805,10 @@ A fixture is a JSON file describing a page's inputs. Its expected output sits ne
   except `CUSTOM`, which is Java and so only available in code.
 - **`compare`:** `WHITESPACE` (default) treats any run of whitespace as one space and ignores
   whitespace between tags, since migrations shift whitespace but shouldn't change content.
-  `EXACT` compares character by character.
+  `EXACT` compares character by character. `HTML` compares parsed element trees, which is what
+  `ThymeleafTester` uses (see below).
+- **`template`** (optional) names the Thymeleaf template the page was migrated to, when the
+  default mapping from the page path doesn't give it.
 
 **Creating and updating expected output.** Run with `-Dorw.tester.update=true`:
 
@@ -826,13 +829,74 @@ edit the entries where you want different output, then update again.
 - A fixture that's already complete isn't rewritten.
 - When a fixture is rewritten, Jackson reformats it: two-space indents, one array element per
   line. Key order and numbers such as `19.90` are kept.
+
 Without the flag, a fixture with no expected output fails and says how to create it, so a CI run
 never accepts a new snapshot silently. A mismatch fails with expected and actual output, which
 IDEs show as a diff.
 
-**Other engines.** Fixtures and `RenderRequest`s don't depend on JSP. `JspTester` implements the
-`Renderer` interface, and `Fixtures.verify(renderer, fixture, update)` works with any renderer, so
-a Thymeleaf renderer can check the migrated templates against the same fixtures and snapshots.
+### Checking the migrated Thymeleaf templates
+
+`ThymeleafTester` renders the Thymeleaf templates the pages were migrated to, **from the same
+fixtures**, and checks them against **the same expected output** the JSP pages produced. That
+tests the migration directly: the template must render what the original page did.
+
+```java
+class OrdersTemplateTest {
+    static final ThymeleafTester templates = ThymeleafTester.builder()
+            .templates(Path.of("src/main/resources/templates"))  // default: classpath templates/
+            .messages("com.acme.shop.MessageResources")          // for #{...}
+            .build();
+
+    @TestFactory
+    Stream<DynamicTest> fixtures() { return templates.fixtureTests(Path.of("src/test/fixtures")); }
+}
+```
+
+**Rendered as Spring MVC renders them.** Templates go through Spring's Thymeleaf integration, so
+expressions use SpEL. `#{…}` comes from a `MessageSource` and depends on the fixture's locale.
+`@{…}` builds links, and `th:field` works, all through Spring's MockMvc, with no server. The
+fixture's inputs map to what a template sees in a Spring MVC application:
+
+| Fixture | Template |
+|---|---|
+| `request` attributes | model variables: `${orders}` |
+| `parameters` | `${param.q}` |
+| `session` | `${session.user}` |
+| `application` | `${application.version}` |
+| `locale` | `#{…}`, `${#locale}` |
+
+`ThymeleafTester` uses Spring Framework 6.2, which matches the tester's Tomcat 10.1 (Servlet 6.0);
+Spring 7 needs Servlet 6.1.
+
+**Which template.** By default a page maps to a template by dropping its `.jsp`/`.jspf` extension
+and a leading `/WEB-INF/views/`, `/WEB-INF/jsp/`, `/WEB-INF/pages/` or `/WEB-INF/`: for example,
+`/WEB-INF/views/orders/list.jsp` becomes `orders/list`. Change the mapping with
+`templateName(page -> …)`, or set `"template": "…"` in a fixture.
+
+**The JSP output is the reference.** Only `JspTester` writes expected output; `ThymeleafTester`
+only compares, even in update mode. To change the expected output, update with the JSP pages.
+
+**Comparison as HTML.** The same HTML written by another engine differs in form, so
+`ThymeleafTester` compares as `HTML` by default (override with `comparison(…)`). Both outputs are
+parsed as HTML and their element trees compared:
+
+- attribute order, quoting, `<br>` vs `<br/>`, comments, and whitespace don't count (text is
+  trimmed and runs of whitespace collapse);
+- text and attribute values do count.
+
+On a mismatch, the expected and actual trees are shown one element per line, so an IDE diff
+points at the element that differs. The `HTML` comparison is also available to JSP fixtures with
+`"compare": "HTML"`.
+
+**Mocked tags.** JSP tag mocks don't apply to Thymeleaf. Where a page uses a mocked tag, the
+template has whatever the tag was migrated to, such as a fragment or a dialect (add it with
+`dialect(…)`). For the outputs to compare, the JSP-side mock must render what the real tag
+renders, which a `MockBehavior.custom` mock in code can do. In the example, `acme:footer` is
+mocked in code to render `<footer class="footer">© 2026 ACME</footer>`, which is also what its
+migrated fragment `~{fragments/footer :: footer(2026)}` renders.
+
+**Programmatic use:** `templates.renderOk(RenderRequest.page("/WEB-INF/views/orders.jsp")…)`, with
+the same `RenderRequest`s as `JspTester`.
 
 ## Writing tests
 

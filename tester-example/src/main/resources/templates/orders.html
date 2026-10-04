@@ -1,0 +1,21 @@
+<!-- The Thymeleaf template orders.jsp is migrated to (for Spring MVC), checked against the same fixtures. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:replace="~{fragments/header :: header}">header</div>
+<h2 th:text="|Orders (${#lists.size(orders)})|">Orders (n)</h2>
+<table>
+  <tr th:each="order : ${orders}">
+    <td th:text="${order.id}">id</td>
+    <td><th:block th:text="${order.customer.name}">name</th:block><th:block th:if="${order.customer.vip}"> (VIP)</th:block></td>
+    <td th:text="${order.total}">total</td>
+    <td th:text="|${#lists.size(order.lines)} lines|">n lines</td>
+  </tr>
+</table>
+<p class="empty" th:if="${#lists.isEmpty(orders)}">No orders.</p>
+<form name="searchForm" method="post" th:action="@{/orders/search.do}">
+  <input type="text" name="q" th:value="${param.q}">
+  <input type="submit" th:value="#{orders.search}">
+</form>
+<footer th:replace="~{fragments/footer :: footer(2026)}">footer</footer>
+</body>
+</html>

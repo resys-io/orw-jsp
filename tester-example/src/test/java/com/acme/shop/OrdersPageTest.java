@@ -29,6 +29,9 @@ class OrdersPageTest {
             // The in-house acme taglib has no implementation here, so it's mocked; its message tag
             // is mocked in Java, for every page and fixture, to show the real text.
             .mock("acme:message", MockBehavior.custom(tag -> MESSAGES.getString(tag.attribute("key"))))
+            // What the real in-house footer tag renders (and the migrated Thymeleaf fragment too).
+            .mock("acme:footer", MockBehavior.custom(tag ->
+                    "<footer class=\"footer\">\u00a9 " + tag.attribute("year") + " ACME</footer>"))
             .build();
 
     @AfterAll
@@ -44,8 +47,7 @@ class OrdersPageTest {
     @Test
     void ordersPageProgrammatically() {
         String out = tester.renderOk(RenderRequest.page("/WEB-INF/views/orders.jsp")
-                .requestAttribute("orders", List.of())
-                .mock("acme:footer", MockBehavior.empty()));
+                .requestAttribute("orders", List.of()));
         assertTrue(out.contains("<h1>Orders</h1>"), out);
         assertTrue(out.contains("No orders."), out);
         assertTrue(tester.getMockedTaglibs().contains("http://acme.example/tags"));

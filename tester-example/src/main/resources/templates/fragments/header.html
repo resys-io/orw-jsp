@@ -1,0 +1,4 @@
+<div class="header" th:fragment="header">
+  <h1 th:text="#{orders.title}">title</h1>
+  <span class="user" th:if="${session.user != null}" th:text="${session.user.name}">user</span>
+</div>

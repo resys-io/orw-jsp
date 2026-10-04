@@ -42,10 +42,5 @@
       "name": "Clerk",
       "vip": false
     }
-  },
-  "mocks": {
-    "acme:footer": {
-      "mode": "PLACEHOLDER"
-    }
   }
 }

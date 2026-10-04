@@ -434,9 +434,29 @@ are in `.internal`.
 - **Expected output** is `<name>.expected.html` next to `<name>.json`. `-Dorw.tester.update=true`
   (Surefire passes it to the forked JVM) writes the actual output instead of comparing. A missing
   expected file fails, so CI never accepts new snapshots silently.
-- **Thymeleaf readiness:** `RenderRequest` and fixtures are engine-neutral, and `Fixtures.verify`
-  takes any `Renderer`. That is the seam for a Thymeleaf renderer reusing the same fixtures and
-  snapshots.
+- **`ThymeleafTester`:** renders the migrated templates from the same fixtures, as Spring MVC would.
+  It builds a `SpringTemplateEngine` (SpEL) and a `ThymeleafViewResolver`, then
+  `MockMvcBuilders.standaloneSetup(new ThymeleafRenderController())`. The internal controller
+  returns the template name passed as a request attribute.
+  - **Fixture inputs:** request attributes → model variables, plus `${param.x}`, `${session.x}`,
+    `${application.x}`, and the locale for `#{…}` (`ResourceBundleMessageSource` via
+    `setTemplateEngineMessageSource`). Application attributes are removed after each render,
+    because MockMvc's servlet context is shared.
+  - **Spring 6.2.x, not 7:** Spring 7 needs Servlet 6.1, and it shares the classpath with Tomcat
+    10.1's Servlet 6.0.
+  - **Template names:** a page maps to a template by `defaultTemplateName` (strip `/WEB-INF/views/`
+    etc. and the `.jsp` extension), by a `templateName(fn)` override, or by a fixture's
+    `"template"`.
+- **The JSP output is the reference:** `Renderer.writesExpectedOutput()` is false for Thymeleaf, so
+  `Fixtures.verify` never writes expected output from it, even in update mode.
+  `Renderer.comparison(fixtureComparison)` lets it compare as `Comparison.HTML` (its default) and
+  ignore the fixture's choice.
+- **`Comparison.HTML`:** parses both outputs with jsoup and builds a canonical one-node-per-line
+  tree. Attributes are sorted, text is whitespace-collapsed and trimmed, and comments are dropped.
+  `display()` shows that tree in failure diffs.
+- **Gotcha (Spring Thymeleaf):** `${param.q}` for an absent parameter renders `value=""` under
+  `th:value`, not "no attribute", so no `?: ''` is needed. An attempt to plant that as a fake bug
+  passed for exactly this reason.
 
 `tester-example` behaves like a real Struts 1 app on Jakarta EE (weblegacy `struts-taglib`
 1.5.0-RC2, plus JSTL 2.0.0, which keeps the `http://java.sun.com/jsp/jstl/*` URIs its pages use).
@@ -446,3 +466,9 @@ and is mocked automatically. Its snapshots in `src/test/fixtures` were generated
 `-Dorw.tester.update=true` on Apache Struts 1.3.10 / Tomcat 9 and reviewed by hand. After the move
 to Jakarta (weblegacy 1.5 / Tomcat 10.1), the regenerated output was byte-identical. That makes it a
 good regression check for the tester itself.
+
+Its migrated templates (`src/main/resources/templates`: `orders.html`, `fragments/header.html`,
+`fragments/footer.html`) are checked by `OrdersTemplateTest` against the same fixtures and expected
+output, compared as HTML. `acme:footer` is mocked in code on the JSP side (`OrdersPageTest`) to render
+what the real tag and its migrated fragment render, `<footer class="footer">© 2026 ACME</footer>`,
+so both sides compare.

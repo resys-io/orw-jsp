@@ -1,7 +1,4 @@
 {
   "page": "/WEB-INF/views/orders.jsp",
-  "request": { "orders": [] },
-  "mocks": {
-    "acme:footer": { "mode": "EMPTY" }
-  }
+  "request": { "orders": [] }
 }
