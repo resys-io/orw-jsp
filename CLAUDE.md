@@ -236,6 +236,24 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   - **EL availability:** its scanner reads any parsed `web.xml` (root `web-app`). A missing
     `version` (DTD-based) or one below 2.4 means EL is off by default, so nothing changes.
     `isELIgnored="true"` pages are skipped too.
+- **`ConvertScriptletsToJstl`** — converts scriptlet `if`/`else`/loops/assignments/outputs to JSTL
+  and EL. It is meant to run after `MigrateJavaVariablesToPageAttributes(mirrorAll)`, and
+  `ConvertScriptletsToJstlTest#pipelineFromRawScriptletsToJstl` runs both together.
+  - **`JavaToEl`:** a recursive-descent translator for a safe subset of Java expressions. Anything
+    outside the subset fails with a reason. EL-visible names are page attributes: step-3 mirrors
+    (`setAttribute("x", x)`), `var`/`id` of existing tags, and loop variables inside converted
+    `<c:forEach>` bodies.
+  - **`ScriptletToJstlConverter`:** finds a block's closer among *sibling* nodes by counting braces
+    (`JspPageAnalyzer.braces`). A tag body with unbalanced braces aborts, since the block crosses
+    the tag boundary. Conversion builds new `Jsp.Tag`s, including `c:choose` chains.
+  - **Loop variables:** a loop's body is converted assuming the loop variable is EL-visible. If
+    Java code in the converted body still references the variable, the loop is rejected and its
+    body is redone without that assumption.
+  - **`c:set`:** `convertAssignments` runs after the structures, because structural conversion is
+    what removes the remaining Java references.
+  - **Shared settings:** it shares `MigrateJavaVariablesToPageAttributes.WebXml` (and its scanner)
+    for the EL-disabled check. `jstlVersion` 1.0 is the exception, because JSTL 1.0 evaluates EL
+    itself; outputs are then written as `<c:out escapeXml="false">`.
 - **`JspInventory`** — an analysis-only `ScanningRecipe` for migration planning. It fills three data
   tables: `table.JspConstructTotals` (written in `generate()`, after every page has been scanned),
   `table.JspConstructUsage` and `table.JspPageInventory` (both written by the scanner, one page at a

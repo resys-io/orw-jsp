@@ -411,6 +411,93 @@ recipe changes nothing and reports why. Without a parsed `web.xml` it assumes EL
 
 **One output difference:** `<%= x %>` prints `null` for a null value; `${x}` prints nothing.
 
+### `ConvertScriptletsToJstl`
+
+**This recipe changes pages.** It converts scriptlets to JSTL and EL wherever the result behaves
+the same:
+
+| Scriptlet | Becomes |
+|---|---|
+| `<% if (c) { %>…<% } %>` | `<c:if test="${…}">…</c:if>` |
+| `if` / `else if` / `else` chains | `<c:choose>`, `<c:when>`, `<c:otherwise>` |
+| `<% for (Order o : orders) { %>…<% } %>` | `<c:forEach var="o" items="${orders}">` |
+| `<% for (int i = a; i < b; i++) { %>` | `<c:forEach var="i" begin="a" end="${b - 1}">` (simple counting loops only) |
+| `<% x = expr; pageContext.setAttribute("x", x); %>` | `<c:set var="x" value="${…}"/>`, once no other Java code uses `x` |
+| `<%= expr %>` | `${…}` |
+
+**Run it after `MigrateJavaVariablesToPageAttributes` with `mirrorAll`.** EL can only see page
+attributes, not Java variables. The two recipes together take raw scriptlets all the way to JSTL:
+
+```java
+Recipe pipeline = new CompositeRecipe(List.of(               // org.openrewrite.config.CompositeRecipe
+        new MigrateJavaVariablesToPageAttributes(null, true), // mirrorAll
+        new ConvertScriptletsToJstl(null, null)));
+```
+
+```jsp
+<%-- before --%>
+<% List orders = (List) request.getAttribute("orders"); %>
+<% for (Order o : orders) { %>
+  <td><%= o.getTotal() %></td>
+<% } %>
+
+<%-- after --%>
+<%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core" %>
+<c:set var="orders" value="${requestScope.orders}"/>
+<c:forEach var="o" items="${orders}">
+  <td>${o.total}</td>
+</c:forEach>
+```
+
+**Java expressions → EL.** Conditions, `items`, bounds, values and outputs are translated by a
+small parser that only accepts Java with an exact EL equivalent:
+
+- getters: `a.getB()` → `a.b`;
+- request parameters and attributes: `request.getParameter("p")` → `param.p`,
+  `request`/`session`/`application.getAttribute("x")` → `requestScope.x` and so on;
+- `.equals()` → `==`, `.isEmpty()` → `empty`, `.size()`/`.length()` → `fn:length(…)`;
+- comparisons (written as `lt`/`gt`/`le`/`ge`), `&&`, `||`, `!`, `?:`, `-`, `*`, `%`, literals,
+  casts (dropped) and indexing.
+
+These are **not** translated, because EL would behave differently:
+
+- `+`: EL can't concatenate strings;
+- `/`: EL divides in floating point;
+- `is…()` getters: EL only reads them for primitive `boolean` properties;
+- other method calls, `new`, and `instanceof`.
+
+In EL, `==` compares objects with `equals()` rather than by reference.
+
+**When a construct stays Java:**
+
+- its expression can't be translated, including when it uses a Java variable that isn't mirrored
+  into a page attribute;
+- the `}` that closes a block isn't in a sibling scriptlet of its own, i.e. the block crosses a
+  tag boundary;
+- an `if` opener has other code after its `{`;
+- Java code in a loop's body still uses the loop variable.
+
+Statements before an opener, or after a closing `}`, are kept in a smaller scriptlet. Every
+construct considered is listed in the `JspScriptletConversions` data table (`sourcePath`, `line`,
+`construct`, `status` = `CONVERTED`/`SKIPPED`, `detail`). `detail` holds the produced EL for a
+conversion, or the reason it stayed Java.
+
+**Taglibs.** The JSTL core library is declared if it's needed and the page doesn't already
+declare it, either itself or through an included file. The functions library is declared when
+`fn:length` is used. If the page declares the library under another prefix, that prefix is used.
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `jstlVersion` | `String` | `1.2` | Selects the taglib URIs. `1.0`: `http://java.sun.com/jstl/core`, no functions library. `1.1`/`1.2`: `http://java.sun.com/jsp/jstl/core`. `3.0`: `jakarta.tags.core`. |
+| `convertOutputs` | `Boolean` | `true` | Also convert `<%= %>` outputs to EL |
+
+**Needs EL.** With JSTL 1.1 or later, nothing changes on `isELIgnored` pages, nor when a parsed
+`web.xml` declares a Servlet version before 2.4 (see `MigrateJavaVariablesToPageAttributes`).
+JSTL 1.0 evaluates EL itself, so with `jstlVersion: 1.0` it works even with EL disabled in the
+container. Outputs are then written as `<c:out value="${…}" escapeXml="false"/>`.
+
 ### `FindJspProblems`
 
 An analysis recipe that finds structural and readability problems. **It changes nothing.** It
