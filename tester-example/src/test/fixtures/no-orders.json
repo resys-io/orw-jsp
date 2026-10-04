@@ -2,7 +2,6 @@
   "page": "/WEB-INF/views/orders.jsp",
   "request": { "orders": [] },
   "mocks": {
-    "acme:message": { "mode": "TEXT", "text": "Orders" },
     "acme:footer": { "mode": "EMPTY" }
   }
 }

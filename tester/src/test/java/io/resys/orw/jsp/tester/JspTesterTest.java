@@ -2,11 +2,16 @@ package io.resys.orw.jsp.tester;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Files;
 
 import java.nio.file.Path;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JspTesterTest {
 
@@ -54,5 +59,46 @@ class JspTesterTest {
         Rendered rendered = tester.render(RenderRequest.page("/broken.jsp"));
         assertThat(rendered.status()).isEqualTo(500);
         assertThat(rendered.body()).contains("broken.jsp");
+    }
+
+    @Test
+    void unresolvableTaglibsCanBeAnError() {
+        try (JspTester strict = JspTester.builder().webapp(Path.of("src/test/webapp")).autoMock(false).build()) {
+            assertThatThrownBy(() -> strict.render(RenderRequest.page("/hello.jsp")))
+                    .hasMessageContaining("No TLD found for the tag libraries [http://acme.example/tags]");
+        }
+    }
+
+    @Test
+    void mocksDefinedInCode(@TempDir Path dir) throws IOException {
+        try (JspTester coded = JspTester.builder().webapp(Path.of("src/test/webapp"))
+                // A mock written in Java: gets the evaluated attributes and the rendered body.
+                .mock("acme:panel", MockBehavior.custom(tag ->
+                        "<section title=\"" + tag.attribute("title") + "\">" + tag.body().trim() + "</section>"))
+                .mock("acme:menu", MockBehavior.text("<nav>shared menu</nav>"))
+                .build()) {
+            String out = coded.renderOk(RenderRequest.page("/hello.jsp").requestAttribute("name", "Ann"));
+            assertThat(out).contains("<section title=\"T\">inside Ann</section>", "<nav>shared menu</nav>");
+
+            // A request's (or fixture's) mock overrides the tester's.
+            String overridden = coded.renderOk(RenderRequest.page("/hello.jsp").requestAttribute("name", "Ann")
+                    .mock("acme:menu", MockBehavior.empty()));
+            assertThat(overridden).contains("<section title=\"T\">").doesNotContain("shared menu");
+
+            // Updating a fixture doesn't add entries for tags mocked in code: they'd override it.
+            Path fixture = Files.writeString(dir.resolve("f.json"), "{\"page\": \"/hello.jsp\", \"request\": {\"name\": \"x\"}}");
+            assertThat(coded.unconfiguredMocks(Fixtures.read(fixture).request())).isEmpty();
+        }
+    }
+
+    @Test
+    void customMockFailuresAreReported() {
+        try (JspTester failing = JspTester.builder().webapp(Path.of("src/test/webapp"))
+                .mock("acme:panel", MockBehavior.custom(tag -> { throw new IllegalStateException("boom"); }))
+                .build()) {
+            Rendered rendered = failing.render(RenderRequest.page("/hello.jsp").requestAttribute("name", "Ann"));
+            assertThat(rendered.status()).isEqualTo(500);
+            assertThat(rendered.body()).contains("The custom mock of <acme:panel> failed", "boom");
+        }
     }
 }

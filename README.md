@@ -9,8 +9,8 @@ plus recipes that clean up and analyze JSP pages.
 |---|---|---|
 | `parser` | `io.resys.orw:resys-orw-jsp-parser` | The JSP syntax tree, `JspParser`, visitors, printer, and the `Assertions.jsp(...)` test helper |
 | `receipes` | `io.resys.orw:resys-orw-jsp-receipes` | The recipes described below |
-| `tester` | `io.resys.orw:resys-orw-jsp-tester` | Renders pages with embedded Tomcat 9 for tests, with fixtures and tag mocking, to check that a migration keeps the output the same (see [Testing pages](#testing-pages-the-tester)) |
-| `tester-example` | `io.resys.orw:resys-orw-jsp-tester-example` | A small Struts 1 web application tested with the tester; an example and a testbed |
+| `tester` | `io.resys.orw:resys-orw-jsp-tester` | Renders pages with embedded Tomcat 10.1 (Jakarta EE) for tests, with fixtures and tag mocking, to check that a migration keeps the output the same (see [Testing pages](#testing-pages-the-tester)) |
+| `tester-example` | `io.resys.orw:resys-orw-jsp-tester-example` | A small Struts 1 (weblegacy 1.5, Jakarta EE) web application tested with the tester; an example and a testbed |
 
 All are version `1.0-SNAPSHOT`, built for Java 21 against OpenRewrite 8.90.4.
 
@@ -689,10 +689,16 @@ class OrdersPageTest {
 
 ### How pages are rendered
 
-- **Tomcat 9 (Jasper), on purpose.** The tester runs embedded **Tomcat 9**, because Struts 1 and
-  similar libraries are built on `javax.servlet`, which Tomcat 10+ (`jakarta.servlet`) can't load.
-  On first use it copies the web application to a temporary directory and starts Tomcat on a free
+- **Tomcat 10.1 (Jasper), Jakarta EE.** The tester runs embedded **Tomcat 10.1** (Servlet 6.0,
+  JSP 3.1), for applications on `jakarta.servlet`, such as Struts 1 as weblegacy's
+  `io.github.weblegacy:struts-*` 1.5, which targets Servlet 5.0 / JSP 3.0 and runs on 10.1 too.
+  Libraries built on `javax.servlet` (Apache Struts 1.3, JSTL 1.2) can't load here. On first use
+  the tester copies the web application to a temporary directory and starts Tomcat on a free
   port; `close()` stops it.
+- **Container APIs must come from Tomcat.** Some libraries declare the Servlet, JSP or EL API at
+  compile scope; for example, `jakarta.servlet.jsp.jstl-api` 2.0.0 pulls in `jakarta.servlet-api`
+  5.0. An older API JAR on the test classpath would shadow Tomcat's own and break renders with a
+  `NoSuchMethodError`. The tester checks for this at startup and names the JAR to exclude.
 - **The application starts as configured.** Its `web.xml` is used as is, so Struts' `ActionServlet`
   starts with its `struts-config.xml`, and Struts tags such as `html:form` and `bean:message` work
   for real.
@@ -716,6 +722,12 @@ A tag library the pages declare but whose TLD can't be found is mocked automatic
 an in-house library whose implementation isn't on the test classpath. To mock a library that is
 available, for example one that needs a database, use `mockTaglib(uri)`.
 
+Automatic mocking also hides libraries that *should* be real but aren't found. Examples are a
+missing dependency, or JSTL 3.0, which no longer declares the `http://java.sun.com/jsp/jstl/*`
+URIs that older pages use. Their tags would render as placeholders and the tests would still
+pass, so the tester logs a warning listing the libraries it mocks automatically. With
+`autoMock(false)`, an unresolvable library is an error instead.
+
 The tester finds every tag and EL function the pages use from a mocked library, using this
 project's parser, and generates a TLD and handler classes for them. A mocked tag accepts any
 attributes and any body content, scriptlets included. Its output follows its `MockBehavior`:
@@ -726,9 +738,35 @@ attributes and any body content, scriptlets included. Its output follows its `Mo
 | `BODY` | Only its body |
 | `EMPTY` | Nothing |
 | `TEXT` | Fixed text instead of the tag |
+| `CUSTOM` | Whatever a Java function returns for the tag (in code only, not in fixture files) |
 
 A mock can also set `variables`, page attributes for tags that define variables. A mocked EL
 function returns its call as text, e.g. `acme:upper(Ann)`.
+
+**Where mocks are defined.** Later levels override earlier ones for the same tag:
+
+1. **The tester**, in code, for every page and fixture: `JspTester.builder().mock(tag, behavior)`.
+2. **A fixture's `mocks`**, or **a `RenderRequest`'s `mock(tag, behavior)`**.
+3. **Otherwise** the tag renders as a `PLACEHOLDER`.
+
+**Mocks written in Java.** `MockBehavior.custom(fn)` gets each use of the tag as a
+`MockInvocation`: its `name`, evaluated `attributes` (with `attribute(name)` as text), rendered
+`body`, and `pageContext`. It returns the output:
+
+```java
+static final ResourceBundle MESSAGES = ResourceBundle.getBundle("com.acme.shop.MessageResources");
+
+static final JspTester tester = JspTester.builder()
+        .webapp(Path.of("src/main/webapp"))
+        // <acme:message key="orders.title"/> renders the real text
+        .mock("acme:message", MockBehavior.custom(tag -> MESSAGES.getString(tag.attribute("key"))))
+        .mock("acme:menu", MockBehavior.text("<nav>…</nav>"))
+        .build();
+```
+
+A tester mock's library must be mocked, automatically or with `mockTaglib`; otherwise the tester
+fails at startup rather than silently ignoring the mock. If a custom mock throws, the render fails
+with a 500 naming the tag.
 
 ### Fixtures
 
@@ -763,7 +801,8 @@ A fixture is a JSON file describing a page's inputs. Its expected output sits ne
   collections. Decimals stay exact `BigDecimal`s, so `19.90` stays `19.90`.
 - **Mistakes fail clearly:** a misspelled property or a class that isn't on the test classpath
   fails with a clear message.
-- **`mocks`** are keyed by tag as written on the page (`prefix:name`).
+- **`mocks`** are keyed by tag as written on the page (`prefix:name`). They can use every mode
+  except `CUSTOM`, which is Java and so only available in code.
 - **`compare`:** `WHITESPACE` (default) treats any run of whitespace as one space and ignores
   whitespace between tags, since migrations shift whitespace but shouldn't change content.
   `EXACT` compares character by character.
@@ -776,6 +815,17 @@ mvn test -Dorw.tester.update=true
 
 or set `JspTester.builder().updateFixtures(true)`. Each fixture's output is then written as its
 expected output instead of being compared. **Review the generated files before committing them.**
+
+**Updating also fills in the fixture's `mocks`.** Each mocked tag the page uses, including in
+included files, gets `"prefix:name": {"mode": "PLACEHOLDER"}` if the fixture doesn't configure it
+and no mock in code covers it. Tags mocked in code are skipped, because a fixture entry would
+override the code. `PLACEHOLDER` is how the tag rendered anyway, so the snapshot doesn't change;
+edit the entries where you want different output, then update again.
+
+- Existing entries are never changed or removed.
+- A fixture that's already complete isn't rewritten.
+- When a fixture is rewritten, Jackson reformats it: two-space indents, one array element per
+  line. Key order and numbers such as `19.90` are kept.
 Without the flag, a fixture with no expected output fails and says how to create it, so a CI run
 never accepts a new snapshot silently. A mismatch fails with expected and actual output, which
 IDEs show as a diff.

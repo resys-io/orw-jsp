@@ -12,7 +12,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -48,6 +50,8 @@ public final class PageScanner {
     public final Map<String, Library> libraries = new LinkedHashMap<>();
     /** Per page (web application path, e.g. "/orders.jsp"): prefix to uri, including included files'. */
     public final Map<String, Map<String, String>> taglibsByPage = new HashMap<>();
+    /** Per page: the custom tags it uses (as written, e.g. "acme:menu"), including included files'. */
+    public final Map<String, Set<String>> tagsByPage = new HashMap<>();
 
     public PageScanner scan(Path webapp) throws IOException {
         List<Path> pages;
@@ -60,15 +64,18 @@ public final class PageScanner {
             if (source instanceof Jsp.Document) {
                 Jsp.Document document = (Jsp.Document) source;
                 Map<String, String> prefixes = new LinkedHashMap<>();
+                Set<String> tags = new TreeSet<>();
                 Path page = webapp.resolve(document.getSourcePath());
-                walk(document.getNodes(), prefixes, page);
-                taglibsByPage.put("/" + document.getSourcePath().toString().replace('\\', '/'), prefixes);
+                walk(document.getNodes(), prefixes, tags, page);
+                String path = "/" + document.getSourcePath().toString().replace('\\', '/');
+                taglibsByPage.put(path, prefixes);
+                tagsByPage.put(path, tags);
             }
         }
         return this;
     }
 
-    private void walk(List<Jsp.Content> nodes, Map<String, String> prefixes, Path page) {
+    private void walk(List<Jsp.Content> nodes, Map<String, String> prefixes, Set<String> tags, Path page) {
         for (Jsp.Content node : nodes) {
             if (node instanceof Jsp.Directive) {
                 Jsp.Directive directive = (Jsp.Directive) node;
@@ -81,10 +88,11 @@ public final class PageScanner {
                     }
                 }
                 if (directive.getIncludedFile() != null) {
-                    walk(directive.getIncludedFile().getNodes(), prefixes, page);
+                    walk(directive.getIncludedFile().getNodes(), prefixes, tags, page);
                 }
             } else if (node instanceof Jsp.Tag) {
                 Jsp.Tag tag = (Jsp.Tag) node;
+                tags.add(tag.getName());
                 int colon = tag.getName().indexOf(':');
                 Library library = library(prefixes, tag.getName().substring(0, colon));
                 if (library != null) {
@@ -97,7 +105,7 @@ public final class PageScanner {
                     }
                 }
                 if (tag.getBody() != null) {
-                    walk(tag.getBody(), prefixes, page);
+                    walk(tag.getBody(), prefixes, tags, page);
                 }
             } else if (node instanceof Jsp.ExpressionLanguage) {
                 functions(((Jsp.ExpressionLanguage) node).getExpression(), prefixes);

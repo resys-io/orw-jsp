@@ -3,8 +3,8 @@ package io.resys.orw.jsp.tester.internal;
 import io.resys.orw.jsp.tester.MockTag;
 import org.eclipse.jdt.core.compiler.batch.BatchCompiler;
 
-import javax.servlet.Servlet;
-import javax.servlet.jsp.tagext.BodyTagSupport;
+import jakarta.servlet.Servlet;
+import jakarta.servlet.jsp.tagext.BodyTagSupport;
 import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
 import java.io.File;
@@ -50,10 +50,10 @@ public final class MockLibraries {
             removeRealTlds(webapp, library.uri);
             StringBuilder tld = new StringBuilder("""
                     <?xml version="1.0" encoding="UTF-8"?>
-                    <taglib xmlns="http://java.sun.com/xml/ns/javaee"
+                    <taglib xmlns="https://jakarta.ee/xml/ns/jakartaee"
                             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                            xsi:schemaLocation="http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-jsptaglibrary_2_1.xsd"
-                            version="2.1">
+                            xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/web-jsptaglibrary_3_0.xsd"
+                            version="3.0">
                         <tlib-version>1.0</tlib-version>
                         <short-name>orw-mock</short-name>
                     """);

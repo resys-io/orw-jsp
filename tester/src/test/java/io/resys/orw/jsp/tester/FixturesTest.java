@@ -96,4 +96,59 @@ class FixturesTest {
                 .put("@class", "java.util.Date").put("@value", "2024-01-31T12:00:00Z"), Path.of("x.json"));
         assertThat(date).isEqualTo(java.util.Date.from(java.time.Instant.parse("2024-01-31T12:00:00Z")));
     }
+
+    private static Path helloFixture(Path dir, String mocks) throws IOException {
+        return Files.writeString(dir.resolve("hello.json"), """
+                {
+                  "page": "/hello.jsp",
+                  "request": { "name": "Ann", "price": 19.90 }%s
+                }
+                """.formatted(mocks));
+    }
+
+    @Test
+    void updateAddsMissingMocks(@TempDir Path dir) throws IOException {
+        Path fixture = helloFixture(dir, ",\n  \"mocks\": { \"acme:menu\": { \"mode\": \"EMPTY\" } }");
+        Fixtures.verify(tester, fixture, true);
+        // acme:menu keeps its configuration; acme:panel (also mocked, used by the page) is added.
+        assertThat(fixture).content().isEqualTo("""
+                {
+                  "page": "/hello.jsp",
+                  "request": {
+                    "name": "Ann",
+                    "price": 19.90
+                  },
+                  "mocks": {
+                    "acme:menu": {
+                      "mode": "EMPTY"
+                    },
+                    "acme:panel": {
+                      "mode": "PLACEHOLDER"
+                    }
+                  }
+                }
+                """);
+        // The added PLACEHOLDER entries render as before: the snapshot still matches.
+        Fixtures.verify(tester, fixture, false);
+    }
+
+    @Test
+    void updateAddsAMocksSectionAndLeavesCompleteFixturesAlone(@TempDir Path dir) throws IOException {
+        Path fixture = helloFixture(dir, "");
+        Fixtures.verify(tester, fixture, true);
+        assertThat(Fixtures.read(fixture).request().getMocks()).containsOnlyKeys("acme:menu", "acme:panel");
+
+        String complete = "{ \"page\": \"/hello.jsp\", \"request\": {\"name\": \"x\"}, " +
+                          "\"mocks\": {\"acme:menu\": {}, \"acme:panel\": {\"mode\": \"BODY\"}} }";
+        Files.writeString(fixture, complete);
+        Fixtures.verify(tester, fixture, true);
+        assertThat(fixture).content().isEqualTo(complete);
+    }
+
+    @Test
+    void customMocksCantBeInFixtureFiles(@TempDir Path dir) throws IOException {
+        Path fixture = helloFixture(dir, ",\n  \"mocks\": { \"acme:menu\": { \"mode\": \"CUSTOM\" } }");
+        assertThatThrownBy(() -> Fixtures.read(fixture))
+                .hasMessageContaining("CUSTOM mocks are Java, so they can only be defined in code");
+    }
 }

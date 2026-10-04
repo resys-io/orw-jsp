@@ -28,12 +28,12 @@ part of it (which would just create an inconsistent mix of both spellings).
   **Parser architecture** below.
 - **`receipes`** (`resys-orw-jsp-receipes`) — `Recipe` subclasses built on the parser, e.g.
   `RemoveUnusedTaglibs`. Depends on `parser`. See **Recipes** below.
-- **`tester`** (`resys-orw-jsp-tester`) — a test library that renders pages with embedded Tomcat 9,
-  with JSON fixtures, snapshot expected output, and tag mocking. It validates that migrations keep
-  page output unchanged. See **Tester** below.
-- **`tester-example`** (`resys-orw-jsp-tester-example`) — a small Struts 1 webapp (`src/main/webapp`,
-  model beans in `com.acme.shop`) tested with the tester. It is both an example and a testbed:
-  change the tester, then run this module.
+- **`tester`** (`resys-orw-jsp-tester`) — a test library that renders pages with embedded Tomcat
+  10.1 (Jakarta EE), with JSON fixtures, snapshot expected output, and tag mocking. It validates
+  that migrations keep page output unchanged. See **Tester** below.
+- **`tester-example`** (`resys-orw-jsp-tester-example`) — a small Struts 1 (weblegacy 1.5, Jakarta
+  EE) webapp (`src/main/webapp`, model beans in `com.acme.shop`) tested with the tester. It is
+  both an example and a testbed: change the tester, then run this module.
 
 `parser` and `receipes` follow the same dependency shape: `lombok` and `org.jetbrains:annotations` as
 `provided`; `rewrite-test` as `provided` (not `test`) because each module's `Assertions` class lives
@@ -378,8 +378,35 @@ Package `io.resys.orw.jsp.tester`. The public API is `JspTester` (builder, `rend
 `Renderer`, and `MockTag`, which has to be public because generated classes extend it. Internals
 are in `.internal`.
 
-- **Tomcat 9, deliberately:** `tomcat.version` is 9.0.x because the target applications (Struts 1)
-  use `javax.servlet`. Don't "upgrade" to 10+/jakarta.
+- **Tomcat 10.1, Jakarta EE:** `tomcat.version` is 10.1.x (Servlet 6.0 / JSP 3.1) because the
+  target application runs on `jakarta.servlet`: Struts 1 as weblegacy's `io.github.weblegacy`
+  1.5, built for Servlet 5.0 / JSP 3.0, which 10.1 runs. The tester was on Tomcat 9 (`javax`)
+  until the application moved off Apache Struts 1.3.
+- **Container APIs come from Tomcat:** `checkContainerApis()` fails at startup if `jakarta.servlet`,
+  `jakarta.servlet.jsp` or `jakarta.el` load from a JAR other than Tomcat's. JSTL 2.0's API JAR
+  declares servlet-api 5.0 and el-api 4.0 at compile scope, and those shadow Tomcat's classes,
+  showing up as `NoSuchMethodError` mid-render. `tester-example` excludes them.
+- **Mock precedence:** the tester's own `mock(tag, behavior)` (builder) is resolved per page through
+  that page's prefix. A `RenderRequest`/fixture mock overrides it, and `PLACEHOLDER` is the
+  default. `checkMocks()` fails at start if a tester mock's prefix maps to a real (unmocked) library
+  on any page.
+- **`CUSTOM` mocks:** `MockTag` returns `EVAL_BODY_BUFFERED`, then at `doEndTag` calls the
+  `Function<MockInvocation, String>` with a copy of the attributes (not `Map.copyOf`, since values
+  can be null), the buffered body and the `PageContext`. JSON fixtures reject `CUSTOM`, because
+  Java can't be expressed there.
+- **Update fills in `mocks`:** `Renderer.unconfiguredMocks(request)` defaults to none.
+  `JspTester` answers from `PageScanner.tagsByPage` (tags as written, including included
+  files') ∩ mocked uris, minus the request's and the tester's mocks. `Fixtures.addMocks` adds
+  `PLACEHOLDER` entries via the Jackson tree, keeping key order and exact decimals, and writes with
+  `FixturePrinter` (`"k": v`, two-space indents, `[]`/`{}` for empties). It rewrites only if
+  something was added.
+- **Quiet shutdown:** `clearReferencesThreadLocals`/`RmiTargets` are off, since leak detection is
+  useless here and on Java 9+ only warns about `--add-opens`. `org.apache.tomcat.util.net` is at
+  SEVERE to hide the acceptor-thread shutdown race.
+- **Auto-mocking is visible:** unresolvable taglibs are mocked with a JUL warning listing them.
+  `autoMock(false)` makes them an error, because a real library that silently gets mocked passes
+  tests as placeholders. One example is JSTL 3.0, which dropped the `http://java.sun.com/jsp/jstl/*`
+  URIs.
 - **How a render works:** `JspTester` copies the webapp to a temp dir, then `PageScanner` (this
   project's parser) finds every taglib and the tags/EL functions used per uri. A uri that
   `TagLibraryResolver` (classpath JARs from `ClassPath`, which follows Surefire's manifest-only
@@ -411,7 +438,11 @@ are in `.internal`.
   takes any `Renderer`. That is the seam for a Thymeleaf renderer reusing the same fixtures and
   snapshots.
 
-`tester-example` behaves like a real Struts 1 app: its `web.xml` starts `ActionServlet` with
-`struts-config.xml`, so `html:`/`bean:` tags render for real. The in-house `acme` taglib
-(`http://acme.example/tags`) has no implementation and is mocked automatically. Its snapshots in
-`src/test/fixtures` were generated with `-Dorw.tester.update=true` and reviewed by hand.
+`tester-example` behaves like a real Struts 1 app on Jakarta EE (weblegacy `struts-taglib`
+1.5.0-RC2, plus JSTL 2.0.0, which keeps the `http://java.sun.com/jsp/jstl/*` URIs its pages use).
+Its `web.xml` (jakartaee 5.0) starts `ActionServlet` with `struts-config.xml`, so `html:`/`bean:`
+tags render for real. The in-house `acme` taglib (`http://acme.example/tags`) has no implementation
+and is mocked automatically. Its snapshots in `src/test/fixtures` were generated with
+`-Dorw.tester.update=true` on Apache Struts 1.3.10 / Tomcat 9 and reviewed by hand. After the move
+to Jakarta (weblegacy 1.5 / Tomcat 10.1), the regenerated output was byte-identical. That makes it a
+good regression check for the tester itself.

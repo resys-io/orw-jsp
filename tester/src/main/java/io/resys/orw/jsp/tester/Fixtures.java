@@ -3,9 +3,14 @@ package io.resys.orw.jsp.tester;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.util.DefaultIndenter;
+import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
+import com.fasterxml.jackson.core.util.Separators;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DynamicTest;
 import org.opentest4j.AssertionFailedError;
@@ -21,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -68,6 +74,48 @@ public final class Fixtures {
             .configure(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES, false)
             .findAndRegisterModules();
 
+    /** Writes fixtures as people do: {@code "key": value}, two-space indents, one array element per line. */
+    private static final ObjectWriter PRETTY = JSON.writer(new FixturePrinter(new DefaultPrettyPrinter()
+            .withObjectIndenter(new DefaultIndenter("  ", "\n"))
+            .withArrayIndenter(new DefaultIndenter("  ", "\n"))
+            .withSeparators(Separators.createDefaultInstance().withObjectFieldValueSpacing(Separators.Spacing.AFTER))));
+
+    /** Jackson's pretty printer, but with empty arrays and objects as {@code []} and <code>{}</code>, not {@code [ ]}. */
+    private static final class FixturePrinter extends DefaultPrettyPrinter {
+        FixturePrinter(DefaultPrettyPrinter base) {
+            super(base);
+        }
+
+        @Override
+        public FixturePrinter createInstance() {
+            return new FixturePrinter(this);
+        }
+
+        @Override
+        public void writeEndArray(JsonGenerator generator, int values) throws IOException {
+            if (values == 0) {
+                if (!_arrayIndenter.isInline()) {
+                    --_nesting;
+                }
+                generator.writeRaw(']');
+            } else {
+                super.writeEndArray(generator, values);
+            }
+        }
+
+        @Override
+        public void writeEndObject(JsonGenerator generator, int entries) throws IOException {
+            if (entries == 0) {
+                if (!_objectIndenter.isInline()) {
+                    --_nesting;
+                }
+                generator.writeRaw('}');
+            } else {
+                super.writeEndObject(generator, entries);
+            }
+        }
+    }
+
     /** A fixture file: the request it describes, and how to compare. */
     public record Fixture(RenderRequest request, Comparison comparison) {
     }
@@ -100,6 +148,7 @@ public final class Fixtures {
         try {
             if (update) {
                 Files.writeString(expectedPath, rendered.body(), StandardCharsets.UTF_8);
+                addMocks(fixturePath, renderer.unconfiguredMocks(fixture.request()));
                 return;
             }
             if (!Files.exists(expectedPath)) {
@@ -131,6 +180,26 @@ public final class Fixtures {
         }
         return fixtures.stream().map(fixture -> DynamicTest.dynamicTest(directory.relativize(fixture).toString(),
                 fixture.toUri(), () -> verify(renderer, fixture, update)));
+    }
+
+    /**
+     * Adds a {@code PLACEHOLDER} entry to the fixture's {@code mocks} for each tag given (mocked
+     * tags its page uses that nothing configured), so they're there to edit. Leaves existing entries
+     * alone, and the file untouched if there's nothing to add.
+     */
+    private static void addMocks(Path fixturePath, Set<String> tags) throws IOException {
+        if (tags.isEmpty()) {
+            return;
+        }
+        ObjectNode root = (ObjectNode) JSON.readTree(fixturePath.toFile());
+        ObjectNode mocks = root.has("mocks") && root.get("mocks").isObject() ?
+                (ObjectNode) root.get("mocks") : root.putObject("mocks");
+        for (String tag : tags) {
+            if (!mocks.has(tag)) {
+                mocks.putObject(tag).put("mode", MockBehavior.Mode.PLACEHOLDER.name());
+            }
+        }
+        Files.writeString(fixturePath, PRETTY.writeValueAsString(root) + "\n", StandardCharsets.UTF_8);
     }
 
     // -----------------------------------------------------------------------------------------
@@ -169,6 +238,11 @@ public final class Fixtures {
             MockBehavior.Mode mode = value.hasNonNull("mode") ?
                     MockBehavior.Mode.valueOf(value.get("mode").asText().toUpperCase(Locale.ROOT)) :
                     MockBehavior.Mode.PLACEHOLDER;
+            if (mode == MockBehavior.Mode.CUSTOM) {
+                throw new IllegalArgumentException(fixture + ": mock '" + tag + "': CUSTOM mocks are Java, so they " +
+                                                   "can only be defined in code, e.g. JspTester.builder().mock(\"" +
+                                                   tag + "\", MockBehavior.custom(...))");
+            }
             Map<String, Object> variables = new LinkedHashMap<>();
             fields(value, "variables").forEach((name, v) -> variables.put(name, value(v, fixture)));
             request.mock(tag, new MockBehavior(mode, text(value, "text"), variables));

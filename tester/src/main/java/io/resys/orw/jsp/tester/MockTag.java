@@ -1,11 +1,12 @@
 package io.resys.orw.jsp.tester;
 
-import javax.servlet.jsp.JspException;
-import javax.servlet.jsp.JspWriter;
-import javax.servlet.jsp.PageContext;
-import javax.servlet.jsp.tagext.BodyTagSupport;
-import javax.servlet.jsp.tagext.DynamicAttributes;
+import jakarta.servlet.jsp.JspException;
+import jakarta.servlet.jsp.JspWriter;
+import jakarta.servlet.jsp.PageContext;
+import jakarta.servlet.jsp.tagext.BodyTagSupport;
+import jakarta.servlet.jsp.tagext.DynamicAttributes;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -72,6 +73,10 @@ public abstract class MockTag extends BodyTagSupport implements DynamicAttribute
                     out.write(behavior.text());
                     return SKIP_BODY;
                 }
+                case CUSTOM -> {
+                    // Render the body into a buffer, for the custom renderer to use at the end tag.
+                    return EVAL_BODY_BUFFERED;
+                }
                 default -> {
                     return SKIP_BODY;
                 }
@@ -86,6 +91,18 @@ public abstract class MockTag extends BodyTagSupport implements DynamicAttribute
         try {
             if (behavior.mode() == MockBehavior.Mode.PLACEHOLDER) {
                 pageContext.getOut().write("</" + prefix + ":" + localName + ">");
+            } else if (behavior.mode() == MockBehavior.Mode.CUSTOM) {
+                String body = bodyContent == null ? "" : bodyContent.getString();
+                // Not Map.copyOf: an attribute may evaluate to null.
+                MockInvocation invocation = new MockInvocation(prefix + ":" + localName, uri,
+                        Collections.unmodifiableMap(new LinkedHashMap<>(attributes)), body, pageContext);
+                String output;
+                try {
+                    output = behavior.renderer().apply(invocation);
+                } catch (RuntimeException e) {
+                    throw new JspException("The custom mock of <" + prefix + ":" + localName + "> failed", e);
+                }
+                pageContext.getOut().write(output == null ? "" : output);
             }
         } catch (IOException e) {
             throw new JspException(e);

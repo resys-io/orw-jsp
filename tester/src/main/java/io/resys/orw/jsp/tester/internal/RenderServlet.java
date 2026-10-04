@@ -4,12 +4,12 @@ import io.resys.orw.jsp.tester.MockBehavior;
 import io.resys.orw.jsp.tester.MockTag;
 import io.resys.orw.jsp.tester.RenderRequest;
 
-import javax.servlet.ServletContext;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpServletResponseWrapper;
-import javax.servlet.http.HttpSession;
+import jakarta.servlet.ServletContext;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponseWrapper;
+import jakarta.servlet.http.HttpSession;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Map;
@@ -48,18 +48,6 @@ public final class RenderServlet extends HttpServlet {
 
         @Override
         public String encodeRedirectURL(String url) {
-            return url;
-        }
-
-        @Override
-        @SuppressWarnings("deprecation")
-        public String encodeUrl(String url) {
-            return url;
-        }
-
-        @Override
-        @SuppressWarnings("deprecation")
-        public String encodeRedirectUrl(String url) {
             return url;
         }
     }

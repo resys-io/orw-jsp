@@ -18,16 +18,34 @@
   -->
 
   <dependencies>
-    <!-- What the application itself uses. -->
+    <!--
+      What the application itself uses: Struts 1 on Jakarta EE (weblegacy's continuation of Apache
+      Struts 1, same org.apache.struts packages), and JSTL 2.0, which still declares the
+      http://java.sun.com/jsp/jstl/* taglib uris (JSTL 3.0 renamed them to jakarta.tags.*).
+    -->
     <dependency>
-      <groupId>org.apache.struts</groupId>
+      <groupId>io.github.weblegacy</groupId>
       <artifactId>struts-taglib</artifactId>
-      <version>1.3.10</version>
+      <version>1.5.0-RC2</version>
     </dependency>
     <dependency>
-      <groupId>javax.servlet</groupId>
-      <artifactId>jstl</artifactId>
-      <version>1.2</version>
+      <groupId>org.glassfish.web</groupId>
+      <artifactId>jakarta.servlet.jsp.jstl</artifactId>
+      <version>2.0.0</version>
+      <exclusions>
+        <!--
+          jakarta.servlet.jsp.jstl-api 2.0.0 declares these at compile scope; the container provides
+          them (in tests, Tomcat 10.1's newer versions, which these older JARs would shadow).
+        -->
+        <exclusion>
+          <groupId>jakarta.servlet</groupId>
+          <artifactId>jakarta.servlet-api</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>jakarta.el</groupId>
+          <artifactId>jakarta.el-api</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>
