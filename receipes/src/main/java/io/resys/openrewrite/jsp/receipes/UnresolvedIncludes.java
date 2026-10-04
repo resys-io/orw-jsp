@@ -26,13 +26,21 @@ final class UnresolvedIncludes {
      * {@code recipeName} must leave {@code document} untouched.
      */
     static boolean mustSkip(Jsp.Document document, String recipeName) {
-        List<String> warnings = new ArrayList<>();
-        collect(document.getNodes(), document.getSourcePath(), warnings);
+        List<String> warnings = find(document);
         for (String warning : warnings) {
             LOGGER.log(System.Logger.Level.WARNING, "{0}: skipping {1} because a static include is unresolved: {2}",
                     recipeName, document.getSourcePath(), warning);
         }
         return !warnings.isEmpty();
+    }
+
+    /**
+     * @return a description of each unresolved include on the page, without logging anything.
+     */
+    static List<String> find(Jsp.Document document) {
+        List<String> warnings = new ArrayList<>();
+        collect(document.getNodes(), document.getSourcePath(), warnings);
+        return warnings;
     }
 
     private static void collect(List<Jsp.Content> nodes, Path file, List<String> warnings) {

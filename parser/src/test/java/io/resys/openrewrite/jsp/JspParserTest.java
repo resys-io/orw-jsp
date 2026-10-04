@@ -1,9 +1,11 @@
 package io.resys.openrewrite.jsp;
 
+import io.resys.openrewrite.jsp.tree.Jsp;
 import org.junit.jupiter.api.Test;
 import org.openrewrite.test.RewriteTest;
 
 import static io.resys.openrewrite.jsp.Assertions.jsp;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Round-trip (parse then print, expecting byte-for-byte identical output) tests covering the
@@ -193,6 +195,59 @@ class JspParserTest implements RewriteTest {
                         </body>
                         </html>
                         """
+                )
+        );
+    }
+
+    @Test
+    void unclosedCustomTagAtEndOfInputIsRecovered() {
+        rewriteRun(
+                jsp(
+                        """
+                        <c:if test="${x}">
+                            <p>never closed</p>
+                        """,
+                        spec -> spec.afterRecipe(document -> {
+                            Jsp.Tag tag = (Jsp.Tag) document.getNodes().get(0);
+                            assertThat(tag.isSelfClosing()).isFalse();
+                            assertThat(tag.getClosing()).isNull();
+                        })
+                )
+        );
+    }
+
+    @Test
+    void unclosedCustomTagEndsAtEnclosingEndTag() {
+        rewriteRun(
+                jsp(
+                        """
+                        <c:forEach var="i" items="${list}">
+                            <c:if test="${i > 0}">
+                                ${i}
+                        </c:forEach>
+                        """,
+                        spec -> spec.afterRecipe(document -> {
+                            Jsp.Tag forEach = (Jsp.Tag) document.getNodes().get(0);
+                            assertThat(forEach.getClosing()).isNotNull();
+                            Jsp.Tag inner = (Jsp.Tag) forEach.getBody().get(1);
+                            assertThat(inner.getName()).isEqualTo("c:if");
+                            assertThat(inner.getClosing()).isNull();
+                        })
+                )
+        );
+    }
+
+    @Test
+    void endTagWithAttributesIsTolerated() {
+        rewriteRun(
+                jsp(
+                        """
+                        <c:if test="${x}">shown</c:if test="${x > 1}">
+                        """,
+                        spec -> spec.afterRecipe(document -> {
+                            Jsp.Tag tag = (Jsp.Tag) document.getNodes().get(0);
+                            assertThat(tag.getClosing().getBeforeTagDelimiterPrefix()).isEqualTo(" test=\"${x > 1}\"");
+                        })
                 )
         );
     }

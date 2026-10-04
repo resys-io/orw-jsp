@@ -46,7 +46,12 @@ mvn -pl parser test -Dtest=JspParserTest#pageDirective         # single test met
 
 Lombok (`@Value`/`@With`/`@EqualsAndHashCode`) generates boilerplate at compile time via annotation
 processing — no extra Maven config needed, but an IDE must have its Lombok plugin enabled to
-resolve the generated accessors/`with*` methods.
+resolve the generated accessors/`with*` methods. The root `lombok.config` sets
+`lombok.anyConstructor.addConstructorProperties = true`. `RewriteTest` round-trips every recipe
+through Jackson, and a `@Value` recipe with `@Option` fields (e.g. `FindJspProblems`) can only be
+deserialized through its generated constructor if that constructor carries `@ConstructorProperties`.
+Maven doesn't track `lombok.config`, so after changing it run `mvn clean` or nothing is
+regenerated.
 
 `org.jspecify.annotations.Nullable` is `TYPE_USE`-only, which bites on any method returning a
 *nested* `Jsp` type (`Jsp.Directive`, `Jsp.Tag`, `Jsp.Attribute.Value`, ...): `@Nullable` has to sit
@@ -166,6 +171,29 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   "anything from this package" is used without a real type checker), and usage is a whole-word
   match on the simple name, not a resolved type reference — same "can only false-positive toward
   keeping, never toward deleting" safety property as `RemoveUnusedTaglibs`.
+- **`FindJspProblems`** — an analysis-only `ScanningRecipe`: it changes nothing, and reports each
+  problem as a `SearchResult` marker plus a row in the `table.JspProblems` data table (with page,
+  file, line, rule). The rules are listed in its Javadoc: tag balance (`MISSING_END_TAG`,
+  `UNMATCHED_END_TAG`, `END_TAG_WITH_ATTRIBUTES`), Java or custom tags inside an HTML start tag
+  (`SCRIPTLET_IN_HTML_TAG`), and readability smells (`ELEMENT_CROSSES_BLOCK`, `GENERATED_ATTRIBUTE`,
+  `HTML_IN_SCRIPTLET`, `LARGE_SCRIPTLET`, and `JSP_IN_HTML_COMMENT`, which fires when JSP code
+  inside `<!-- -->` still runs and asks whether `<%-- --%>` was meant; it is reported once per
+  comment and EL is deliberately exempt). The logic lives in `JspPageAnalyzer`. Because HTML is
+  only `Jsp.Text` in the LST, it runs its own small HTML tokenizer over the text nodes in document
+  order. The tokenizer's state carries across JSP nodes, which is what makes "a scriptlet inside
+  `<option ...>`" visible at all. Open elements sit on a stack interleaved with *barriers* (a JSP
+  action body, or a Java `{ }` block opened by a scriptlet, from `JspPageAnalyzer.braces`), so an
+  element opened in a block and closed outside it is caught. Included files are analyzed in place,
+  so a `<div>` opened in a header include and closed in a footer include balances (no
+  `MISSING_END_TAG`/`UNMATCHED_END_TAG`) but is reported as `TAG_SPLIT_ACROSS_FILES`, as is a single
+  tag split by an include. The `allowSplitBetweenIncludedFiles` option silences the header/footer
+  case only: an element whose two tags are in two *included* files. One tag in the page and the
+  other in an include is always reported. Problems inside included files are anchored to the
+  page's include directive. The scan phase collects every include target. Those files and all
+  `.jspf` files are *fragments*, so "left open at end of file" and "end tag with no start tag" are
+  not reported for them. A page with an unresolved include gets
+  `UNRESOLVED_INCLUDE` and no balance checks. To place a marker at an exact offset inside a
+  `Jsp.Text`, the analyzer splits that text node, which still prints identically.
 
 Recipes here follow the `@Value @EqualsAndHashCode(callSuper = false)` declarative style used
 throughout OpenRewrite (see `org.openrewrite.xml.RemoveXmlTag` for the canonical example):
@@ -207,4 +235,12 @@ the directive under test) rather than fighting the framework.
 
 Malformed input must never hang or throw past the parser boundary — `JspParser.parseInputs`
 catches parsing failures and returns `org.openrewrite.tree.ParseError` instead, per the
-`org.openrewrite.Parser` contract.
+`org.openrewrite.Parser` contract. Two kinds of malformed markup are deliberately *recovered from*
+rather than failed, so that `FindJspProblems` can report them (a `ParseError` page is invisible to
+recipes):
+- A custom/standard action missing its end tag gets `closing == null`. Its body ends at the end of
+  input or at an *enclosing* action's end tag.
+- An end tag with attributes (`</c:if test="x">`) keeps that trailing text verbatim in
+  `Tag.Closing#getBeforeTagDelimiterPrefix()`.
+
+Code that reads `Jsp.Tag#getClosing()` must handle `null` even when `isSelfClosing()` is false.

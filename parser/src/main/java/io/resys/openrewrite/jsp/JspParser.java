@@ -89,7 +89,7 @@ public class JspParser implements Parser {
                                         EncodingDetectingInputStream source) {
         String text = source.readFully();
         Scanner scanner = new Scanner(text, new FileContext(includes, absolutePath, Set.of(absolutePath)));
-        List<Jsp.Content> nodes = parseNodes(scanner, null);
+        List<Jsp.Content> nodes = parseNodes(scanner, List.of());
         return new Jsp.Document(
                 randomId(),
                 Markers.EMPTY,
@@ -138,24 +138,21 @@ public class JspParser implements Parser {
     // -----------------------------------------------------------------------------------------
 
     /**
-     * Parses a run of top-level content, stopping either at end of input (when {@code stopTagName}
-     * is {@code null}, i.e. we are at the document root) or just before a matching
-     * {@code </stopTagName ...>} closing tag (when parsing a {@link Jsp.Tag}'s body), which is left
+     * Parses a run of content, stopping at end of input or just before a {@code </name ...>}
+     * closing tag matching any of the {@code openTags} (the names of the {@link Jsp.Tag}s whose
+     * bodies are being parsed, innermost last; empty at the document root), which is left
      * unconsumed for the caller to parse itself via {@link #parseClosing}.
+     * <p>
+     * Stopping at an <em>enclosing</em> tag's closing tag (or at end of input) rather than only at
+     * the innermost one is how a missing end tag is recovered from: the innermost tag is then left
+     * unclosed (see {@link #parseTag}) instead of swallowing the rest of the page or failing it.
      */
-    private static List<Jsp.Content> parseNodes(Scanner sc, @Nullable String stopTagName) {
+    private static List<Jsp.Content> parseNodes(Scanner sc, List<String> openTags) {
         List<Jsp.Content> nodes = new ArrayList<>();
         StringBuilder text = new StringBuilder();
 
         while (true) {
-            if (stopTagName != null && matchesClosingTag(sc, stopTagName)) {
-                break;
-            }
-            if (sc.isEof()) {
-                if (stopTagName != null) {
-                    throw new JspParsingException("Unterminated tag <" + stopTagName +
-                                                   ">: missing closing </" + stopTagName + ">");
-                }
+            if (matchesAnyClosingTag(sc, openTags) || sc.isEof()) {
                 break;
             }
 
@@ -188,7 +185,7 @@ public class JspParser implements Parser {
                 nodes.add(parseExpressionLanguage(sc));
             } else if (sc.peek() == '<' && looksLikeTagStart(sc)) {
                 flushText(nodes, text);
-                nodes.add(parseTag(sc));
+                nodes.add(parseTag(sc, openTags));
             } else {
                 text.append(sc.peek());
                 sc.advance(1);
@@ -332,7 +329,7 @@ public class JspParser implements Parser {
         return new Jsp.ExpressionLanguage(randomId(), "", Markers.EMPTY, type, sb.toString());
     }
 
-    private static Jsp.Tag parseTag(Scanner sc) {
+    private static Jsp.Tag parseTag(Scanner sc, List<String> openTags) {
         sc.advance(1); // '<'
         String name = sc.scanName();
         List<Jsp.Attribute> attributes = parseAttributes(sc);
@@ -353,19 +350,41 @@ public class JspParser implements Parser {
             return new Jsp.Tag(randomId(), "", Markers.EMPTY, name, attributes, true, beforeDelim, null, null);
         }
 
-        List<Jsp.Content> body = parseNodes(sc, name);
-        Jsp.Tag.Closing closing = parseClosing(sc);
+        List<String> bodyOpenTags = new ArrayList<>(openTags);
+        bodyOpenTags.add(name);
+        List<Jsp.Content> body = parseNodes(sc, bodyOpenTags);
+        // Missing end tag: the body ran to end of input or to an enclosing tag's end tag.
+        Jsp.Tag.Closing closing = matchesClosingTag(sc, name) ? parseClosing(sc) : null;
         return new Jsp.Tag(randomId(), "", Markers.EMPTY, name, attributes, false, beforeDelim, body, closing);
     }
 
+    /**
+     * Parses a closing tag. Anything between the name and the {@code >} is kept verbatim as the
+     * closing's {@link Jsp.Tag.Closing#getBeforeTagDelimiterPrefix()}: normally just whitespace,
+     * but invalid trailing content (e.g. attributes on an end tag) is tolerated rather than failing
+     * the page.
+     */
     private static Jsp.Tag.Closing parseClosing(Scanner sc) {
         sc.advance(2); // "</"
         String beforeName = sc.scanWhitespace();
         String name = sc.scanName();
-        String beforeDelim = sc.scanWhitespace();
-        if (!sc.startsWith(">")) {
+        int start = sc.pos;
+        Character quote = null;
+        while (!sc.isEof() && (quote != null || sc.peek() != '>')) {
+            char c = sc.peek();
+            if (quote != null) {
+                if (c == quote) {
+                    quote = null;
+                }
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            }
+            sc.advance(1);
+        }
+        if (sc.isEof()) {
             throw new JspParsingException("Malformed closing tag </" + name + " ...>: expected '>'");
         }
+        String beforeDelim = sc.s.substring(start, sc.pos);
         sc.advance(1);
         return new Jsp.Tag.Closing(randomId(), beforeName, Markers.EMPTY, name, beforeDelim);
     }
@@ -401,6 +420,15 @@ public class JspParser implements Parser {
             attributes.add(new Jsp.Attribute(randomId(), ws, Markers.EMPTY, name, beforeEquals, attrValue));
         }
         return attributes;
+    }
+
+    private static boolean matchesAnyClosingTag(Scanner sc, List<String> openTags) {
+        for (String openTag : openTags) {
+            if (matchesClosingTag(sc, openTag)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -517,7 +545,7 @@ public class JspParser implements Parser {
             chain.add(target);
             List<Jsp.Content> nodes;
             try {
-                nodes = parseNodes(new Scanner(text, new FileContext(this, target, chain)), null);
+                nodes = parseNodes(new Scanner(text, new FileContext(this, target, chain)), List.of());
             } catch (JspParsingException e) {
                 throw new UnresolvedIncludeException("Included file '" + file + "' could not be parsed: " +
                                                       e.getMessage());

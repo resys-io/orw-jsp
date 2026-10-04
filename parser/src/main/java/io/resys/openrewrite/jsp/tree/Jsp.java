@@ -434,8 +434,11 @@ public interface Jsp extends Tree {
         List<Content> body;
 
         /**
-         * The closing tag, or {@code null} if {@link #isSelfClosing()}.
+         * The closing tag, or {@code null} if {@link #isSelfClosing()} or if the end tag is missing
+         * (a malformed page; the parser recovers by ending the body at the end of input or at an
+         * enclosing tag's end tag, whichever comes first).
          */
+        @Nullable
         Closing closing;
 
         @Override
@@ -462,7 +465,9 @@ public interface Jsp extends Tree {
             String name;
 
             /**
-             * Whitespace before the closing {@code >}.
+             * Whitespace before the closing {@code >}. In a malformed end tag carrying attributes
+             * (e.g. {@code </c:if test="x">}), which the parser tolerates, this holds that whole
+             * raw text verbatim instead.
              */
             String beforeTagDelimiterPrefix;
 

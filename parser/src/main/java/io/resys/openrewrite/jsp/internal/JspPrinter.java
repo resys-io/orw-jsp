@@ -98,8 +98,10 @@ public class JspPrinter<P> extends JspVisitor<PrintOutputCapture<P>> {
             p.append('>');
             visit(tag.getBody(), p);
             Jsp.Tag.Closing closing = tag.getClosing();
-            p.append("</").append(closing.getPrefix()).append(closing.getName())
-                    .append(closing.getBeforeTagDelimiterPrefix()).append('>');
+            if (closing != null) {
+                p.append("</").append(closing.getPrefix()).append(closing.getName())
+                        .append(closing.getBeforeTagDelimiterPrefix()).append('>');
+            }
         }
         afterSyntax(tag, p);
         return tag;
