@@ -25,6 +25,11 @@ public class JspIsoVisitor<P> extends JspVisitor<P> {
     }
 
     @Override
+    public Jsp.IncludedFile visitIncludedFile(Jsp.IncludedFile includedFile, P p) {
+        return (Jsp.IncludedFile) super.visitIncludedFile(includedFile, p);
+    }
+
+    @Override
     public Jsp.Declaration visitDeclaration(Jsp.Declaration declaration, P p) {
         return (Jsp.Declaration) super.visitDeclaration(declaration, p);
     }

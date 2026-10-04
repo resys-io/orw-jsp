@@ -201,9 +201,59 @@ public interface Jsp extends Tree {
          */
         String beforeDirectiveEnd;
 
+        /**
+         * For an {@code <%@ include file="..." %>} directive whose target could be resolved, the
+         * parsed content of the included file; {@code null} for every other directive, and for an
+         * include whose target could not be found (or would include itself recursively).
+         * <p>
+         * This is a read-only view: it is never printed (the directive prints as itself, not as the
+         * included text), and {@link JspVisitor} visits it but discards any changes made to it, so a
+         * recipe can never modify the included file through the page that includes it.
+         */
+        @Nullable
+        IncludedFile includedFile;
+
         @Override
         public <P> Jsp acceptJsp(JspVisitor<P> v, P p) {
             return v.visitDirective(this, p);
+        }
+    }
+
+    /**
+     * The content of a file statically included by an {@code <%@ include file="..." %>}
+     * {@link Directive}, embedded into the including page's tree so that recipes can take it into
+     * account (e.g. a taglib declared on the page but only used inside the included fragment).
+     * See {@link Directive#getIncludedFile()} for why it is read-only.
+     */
+    @lombok.Value
+    @EqualsAndHashCode(callSuper = false, onlyExplicitlyIncluded = true)
+    @With
+    class IncludedFile implements Jsp {
+        @EqualsAndHashCode.Include
+        UUID id;
+
+        Markers markers;
+
+        /**
+         * The resolved path of the included file, in the same form as {@link Document#getSourcePath()}.
+         */
+        Path sourcePath;
+
+        List<Content> nodes;
+
+        @Override
+        public String getPrefix() {
+            return "";
+        }
+
+        @Override
+        public IncludedFile withPrefix(String prefix) {
+            return this;
+        }
+
+        @Override
+        public <P> Jsp acceptJsp(JspVisitor<P> v, P p) {
+            return v.visitIncludedFile(this, p);
         }
     }
 

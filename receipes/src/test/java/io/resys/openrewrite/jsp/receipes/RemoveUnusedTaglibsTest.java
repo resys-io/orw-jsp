@@ -119,4 +119,37 @@ class RemoveUnusedTaglibsTest implements RewriteTest {
                 )
         );
     }
+
+    @Test
+    void ignoreUnbalancedTags() {
+        rewriteRun(
+                jsp(
+                        """
+                        <html><body>plain page</body></html>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void keepsTaglibUsedOnlyInStaticallyIncludedFile() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="text/html" %>
+                        <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+                        <%@ taglib prefix="unused" uri="http://example.com/unused" %>
+                        <%@ include file="includes/page_name.jsp" %>
+                        """,
+                        """
+                        <%@ page contentType="text/html" %>
+                        <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+
+                        <%@ include file="includes/page_name.jsp" %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp("<h1><c:out value=\"${pageName}\"/></h1>", spec -> spec.path("includes/page_name.jsp"))
+        );
+    }
 }

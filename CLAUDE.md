@@ -105,6 +105,19 @@ a true prefix, exactly like `Xml.Attribute`.
 sibling `Jsp.Text` nodes that are untouched. `RemoveUnusedTaglibs` (see below) is a real example of
 this; it's expected/documented behavior, not a bug to work around.
 
+**Static includes (`<%@ include file="..." %>`)** are resolved at parse time and the target's
+parsed nodes are embedded as `Jsp.Directive#getIncludedFile()` (a `Jsp.IncludedFile`). This view
+is strictly read-only: `JspPrinter` never prints it, and `JspVisitor#visitDirective` visits it but
+throws away the result, so a recipe can never change an included file through the page that
+includes it. (The included file is still a normal source file of its own if it's part of the
+parse.) Targets are looked up first among the inputs of the same `parseInputs` call, so tests can
+supply them as sibling `jsp(..., spec -> spec.path("includes/x.jsp"))` sources, and then on disk.
+Relative paths resolve against the including file's directory, and `/`-prefixed ones against the
+nearest ancestor containing `WEB-INF`. A missing, unparseable, or recursive include leaves
+`includedFile` as `null` instead of failing the page. Recipes that hand-walk node lists (as both
+current recipes do) must explicitly descend into `getIncludedFile().getNodes()` to see that
+content: both usage scans do, and both removal passes deliberately don't.
+
 **Known, documented limitations** (see the class Javadoc on `Jsp` and `JspParser` for details):
 - Scriptlet/declaration/expression code is terminated by the first unescaped `%>`; a `%>` inside a
   Java string/char literal in that code will end the tag early.

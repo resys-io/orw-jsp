@@ -36,7 +36,20 @@ public class JspVisitor<P> extends TreeVisitor<Jsp, P> {
     public Jsp visitDirective(Jsp.Directive directive, P p) {
         Jsp.Directive d = directive;
         d = d.withMarkers(visitMarkers(d.getMarkers(), p));
-        return d.withAttributes(ListUtils.map(d.getAttributes(), a -> (Jsp.Attribute) visit(a, p)));
+        d = d.withAttributes(ListUtils.map(d.getAttributes(), a -> (Jsp.Attribute) visit(a, p)));
+        if (d.getIncludedFile() != null) {
+            // Visited so that visitors can observe the included content, but the result is
+            // deliberately discarded: the included file must never be modified through the page
+            // that includes it.
+            visit(d.getIncludedFile(), p);
+        }
+        return d;
+    }
+
+    public Jsp visitIncludedFile(Jsp.IncludedFile includedFile, P p) {
+        Jsp.IncludedFile i = includedFile;
+        i = i.withMarkers(visitMarkers(i.getMarkers(), p));
+        return i.withNodes(ListUtils.map(i.getNodes(), c -> (Jsp.Content) visit(c, p)));
     }
 
     public Jsp visitDeclaration(Jsp.Declaration declaration, P p) {

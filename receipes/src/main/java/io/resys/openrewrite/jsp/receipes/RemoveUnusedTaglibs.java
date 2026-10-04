@@ -119,8 +119,13 @@ public class RemoveUnusedTaglibs extends Recipe {
             } else if (node instanceof Jsp.ExpressionLanguage) {
                 markTextUsage(((Jsp.ExpressionLanguage) node).getExpression(), referencePatterns, used);
             } else if (node instanceof Jsp.Directive) {
-                for (Jsp.Attribute attribute : ((Jsp.Directive) node).getAttributes()) {
+                Jsp.Directive directive = (Jsp.Directive) node;
+                for (Jsp.Attribute attribute : directive.getAttributes()) {
                     markTextUsage(attribute.getValue().getValue(), referencePatterns, used);
+                }
+                if (directive.getIncludedFile() != null) {
+                    // A statically included fragment shares the page's taglib declarations.
+                    collectUsedPrefixes(directive.getIncludedFile().getNodes(), referencePatterns, used);
                 }
             }
         }

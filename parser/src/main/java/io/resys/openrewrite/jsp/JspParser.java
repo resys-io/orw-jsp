@@ -10,9 +10,17 @@ import org.openrewrite.tree.ParseError;
 import org.openrewrite.tree.ParsingEventListener;
 import org.openrewrite.tree.ParsingExecutionContextView;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static java.util.Collections.unmodifiableList;
@@ -29,6 +37,16 @@ import static org.openrewrite.Tree.randomId;
  * and standard/custom actions (elements with a namespace-prefixed name, e.g. {@code jsp:include}
  * or {@code c:if}). Everything else, including all plain HTML markup, is preserved verbatim as
  * {@link Jsp.Text}. See {@link Jsp} for the full rationale.
+ * <p>
+ * Static includes ({@code <%@ include file="..." %>}) are resolved and the included file's parsed
+ * content is embedded, read-only, as {@link Jsp.Directive#getIncludedFile()} (see there). A relative
+ * {@code file} is resolved against the directory of the file containing the directive; a
+ * context-relative one (leading {@code /}) against the web application root, taken to be the
+ * nearest ancestor directory containing {@code WEB-INF} (or, failing that, the nearest ancestor
+ * under which the target exists). The target is looked up first among the inputs of the same
+ * {@link #parseInputs} call, then on disk. An include that cannot be resolved, cannot be parsed, or
+ * would include itself recursively is left with a {@code null} included file rather than failing
+ * the including page.
  * <p>
  * Known limitations (documented rather than silently mishandled):
  * <ul>
@@ -50,11 +68,12 @@ public class JspParser implements Parser {
     @Override
     public Stream<SourceFile> parseInputs(Iterable<Input> sourceFiles, @Nullable Path relativeTo, ExecutionContext ctx) {
         ParsingEventListener parsingListener = ParsingExecutionContextView.view(ctx).getParsingListener();
+        Includes includes = new Includes(sourceFiles, relativeTo, ctx);
         return acceptedInputs(sourceFiles).map(input -> {
             parsingListener.startedParsing(input);
             Path path = input.getRelativePath(relativeTo);
             try (EncodingDetectingInputStream is = input.getSource(ctx)) {
-                Jsp.Document document = parseFromInput(path, is)
+                Jsp.Document document = parseFromInput(path, includes.absolute(input.getPath()), includes, is)
                         .withFileAttributes(input.getFileAttributes());
                 parsingListener.parsed(input, document);
                 return requirePrintEqualsInput(document, input, relativeTo, ctx);
@@ -65,9 +84,10 @@ public class JspParser implements Parser {
         });
     }
 
-    private Jsp.Document parseFromInput(Path sourcePath, EncodingDetectingInputStream source) {
+    private Jsp.Document parseFromInput(Path sourcePath, Path absolutePath, Includes includes,
+                                        EncodingDetectingInputStream source) {
         String text = source.readFully();
-        Scanner scanner = new Scanner(text);
+        Scanner scanner = new Scanner(text, new FileContext(includes, absolutePath, Set.of(absolutePath)));
         List<Jsp.Content> nodes = parseNodes(scanner, null);
         return new Jsp.Document(
                 randomId(),
@@ -206,7 +226,15 @@ public class JspParser implements Parser {
             throw new JspParsingException("Malformed directive <%@ " + name + " ...>: expected %>");
         }
         sc.advance(2);
-        return new Jsp.Directive(randomId(), "", Markers.EMPTY, beforeName, name, attributes, beforeEnd);
+        Jsp.IncludedFile includedFile = null;
+        if ("include".equals(name)) {
+            for (Jsp.Attribute attribute : attributes) {
+                if ("file".equals(attribute.getName())) {
+                    includedFile = sc.file.includes().parse(sc.file, attribute.getValue().getValue());
+                }
+            }
+        }
+        return new Jsp.Directive(randomId(), "", Markers.EMPTY, beforeName, name, attributes, beforeEnd, includedFile);
     }
 
     private static Jsp.Declaration parseDeclaration(Scanner sc) {
@@ -429,14 +457,123 @@ public class JspParser implements Parser {
     }
 
     /**
+     * The file being scanned, plus what's needed to resolve and parse its static includes.
+     *
+     * @param absolutePath the file's normalized absolute path.
+     * @param chain        the absolute paths of every file on the current include chain, including
+     *                     this one, used to refuse recursive includes.
+     */
+    private record FileContext(Includes includes, Path absolutePath, Set<Path> chain) {
+    }
+
+    /**
+     * Resolves and parses the targets of {@code <%@ include file="..." %>} directives. All paths are
+     * handled in normalized absolute form; inputs of the current parse batch take precedence over
+     * files on disk.
+     */
+    private static final class Includes {
+        private final Map<Path, Input> inputsByPath = new HashMap<>();
+        private final Path base;
+        private final ExecutionContext ctx;
+
+        Includes(Iterable<Input> inputs, @Nullable Path relativeTo, ExecutionContext ctx) {
+            this.base = (relativeTo == null ? Paths.get("") : relativeTo).toAbsolutePath().normalize();
+            this.ctx = ctx;
+            for (Input input : inputs) {
+                inputsByPath.putIfAbsent(absolute(input.getPath()), input);
+            }
+        }
+
+        Path absolute(Path path) {
+            return base.resolve(path).normalize();
+        }
+
+        Jsp.@Nullable IncludedFile parse(FileContext including, String file) {
+            Path target = resolve(including.absolutePath(), file);
+            if (target == null || including.chain().contains(target)) {
+                return null;
+            }
+            String text = read(target);
+            if (text == null) {
+                return null;
+            }
+            Set<Path> chain = new HashSet<>(including.chain());
+            chain.add(target);
+            List<Jsp.Content> nodes;
+            try {
+                nodes = parseNodes(new Scanner(text, new FileContext(this, target, chain)), null);
+            } catch (JspParsingException e) {
+                return null;
+            }
+            Path sourcePath = target.startsWith(base) ? base.relativize(target) : target;
+            return new Jsp.IncludedFile(randomId(), Markers.EMPTY, sourcePath, unmodifiableList(nodes));
+        }
+
+        private @Nullable Path resolve(Path includingFile, String file) {
+            Path dir = includingFile.getParent();
+            if (dir == null || file.isEmpty()) {
+                return null;
+            }
+            if (!file.startsWith("/")) {
+                Path target = dir.resolve(file).normalize();
+                return exists(target) ? target : null;
+            }
+
+            String contextRelative = file.substring(1);
+            for (Path d = dir; d != null; d = d.getParent()) {
+                if (isWebRoot(d)) {
+                    Path target = d.resolve(contextRelative).normalize();
+                    return exists(target) ? target : null;
+                }
+            }
+            for (Path d = dir; d != null; d = d.getParent()) {
+                Path target = d.resolve(contextRelative).normalize();
+                if (exists(target)) {
+                    return target;
+                }
+            }
+            return null;
+        }
+
+        private boolean isWebRoot(Path dir) {
+            Path webInf = dir.resolve("WEB-INF");
+            if (Files.isDirectory(webInf)) {
+                return true;
+            }
+            for (Path path : inputsByPath.keySet()) {
+                if (path.startsWith(webInf)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean exists(Path path) {
+            return inputsByPath.containsKey(path) || Files.isRegularFile(path);
+        }
+
+        private @Nullable String read(Path path) {
+            Input input = inputsByPath.get(path);
+            try (EncodingDetectingInputStream is = input != null ?
+                    input.getSource(ctx) : new EncodingDetectingInputStream(Files.newInputStream(path))) {
+                return is.readFully();
+            } catch (IOException | UncheckedIOException e) {
+                return null;
+            }
+        }
+    }
+
+    /**
      * A simple mutable cursor over the source text.
      */
     private static final class Scanner {
         final String s;
+        final FileContext file;
         int pos;
 
-        Scanner(String s) {
+        Scanner(String s, FileContext file) {
             this.s = s;
+            this.file = file;
             this.pos = 0;
         }
 

@@ -92,6 +92,12 @@ public class RemoveUnusedImports extends Recipe {
                 if (body != null) {
                     appendJavaCode(body, sb);
                 }
+            } else if (node instanceof Jsp.Directive) {
+                Jsp.IncludedFile includedFile = ((Jsp.Directive) node).getIncludedFile();
+                if (includedFile != null) {
+                    // A statically included fragment is compiled into the same servlet as the page.
+                    appendJavaCode(includedFile.getNodes(), sb);
+                }
             }
         }
     }

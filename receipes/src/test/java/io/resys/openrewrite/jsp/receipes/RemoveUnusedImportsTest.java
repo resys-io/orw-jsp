@@ -222,4 +222,24 @@ class RemoveUnusedImportsTest implements RewriteTest {
                 )
         );
     }
+
+    @Test
+    void keepsImportUsedOnlyInStaticallyIncludedFile() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="text/html" %>
+                        <%@ page import="java.util.Date,java.util.List" %>
+                        <%@ include file="includes/date.jspf" %>
+                        """,
+                        """
+                        <%@ page contentType="text/html" %>
+                        <%@ page import="java.util.Date" %>
+                        <%@ include file="includes/date.jspf" %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp("<%= new Date() %>", spec -> spec.path("includes/date.jspf"))
+        );
+    }
 }
