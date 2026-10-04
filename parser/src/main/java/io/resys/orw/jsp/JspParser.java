@@ -768,6 +768,15 @@ public class JspParser implements Parser {
         @Nullable
         String scanQuotedValue(char quote) {
             int start = pos;
+            // A request-time expression value, "<%= ... %>", runs to its %>: like Jasper, quotes
+            // inside the Java code (value="<%= bean.get("x") %>") don't end the value.
+            if (startsWith("<%=")) {
+                int end = s.indexOf("%>", pos + 3);
+                if (end >= 0 && end + 2 < s.length() && s.charAt(end + 2) == quote) {
+                    pos = end + 3;
+                    return s.substring(start, end + 2);
+                }
+            }
             while (true) {
                 if (isEof()) {
                     return null;

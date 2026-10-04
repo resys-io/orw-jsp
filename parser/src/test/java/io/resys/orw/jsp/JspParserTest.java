@@ -251,4 +251,22 @@ class JspParserTest implements RewriteTest {
                 )
         );
     }
+
+    @Test
+    void requestTimeAttributeValueWithQuotesInsideTheExpression() {
+        // Common in Struts 1 pages; Jasper reads such a value up to its %>.
+        rewriteRun(
+                jsp(
+                        """
+                        <html:text property="name" value="<%= bean.get("name") %>"/>
+                        <html:text property="x" value='<%= map.get('k') %>'/>
+                        """,
+                        spec -> spec.afterRecipe(document -> {
+                            Jsp.Tag tag = (Jsp.Tag) document.getNodes().get(0);
+                            assertThat(tag.getAttributes().get(1).getValue().getValue())
+                                    .isEqualTo("<%= bean.get(\"name\") %>");
+                        })
+                )
+        );
+    }
 }
