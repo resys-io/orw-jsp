@@ -208,6 +208,16 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
     the page's Java code together, since getters often come in a later scriptlet. Attributes the
     page `setAttribute`s itself stop being inputs from that point on.
   - **Type names:** simple type names are qualified with the page's `<%@ page import %>`s.
+- **`FindStaticMethodCalls`** — marks static method calls in Java code with `SearchResult`s and lists
+  them in `table.JspStaticMethodCalls`. The `exclusions` option takes `*`/`**` glob patterns on
+  `fully.qualified.Class.method`. Detection and import resolution live in `StaticCalls`. Without
+  type information it relies on naming conventions; see its Javadoc for what it excludes.
+  - **Lines:** come from `JspPositions`, which prints the document once with a `JspPrinter`
+    subclass that records each node's start offset. Reuse it for any recipe that reports lines.
+  - **Included content:** the base `JspVisitor` visits included files' nodes, discarding the
+    results. Visitor-based recipes therefore have to skip nodes under a `Jsp.IncludedFile`
+    (`getCursor().firstEnclosing(Jsp.IncludedFile.class)`), or they would report an included
+    file's content once per page that includes it.
 - **`JspInventory`** — an analysis-only `ScanningRecipe` for migration planning. It fills three data
   tables: `table.JspConstructTotals` (written in `generate()`, after every page has been scanned),
   `table.JspConstructUsage` and `table.JspPageInventory` (both written by the scanner, one page at a

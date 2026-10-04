@@ -299,6 +299,53 @@ properties its fields read.
 **Limitations:** this is text matching, not a real Java or EL parser, so unusual code can be
 missed. A type is only as precise as the page states it.
 
+### `FindStaticMethodCalls`
+
+Finds static method calls in the Java code of pages, since a migration has to move them out of
+the view. It looks in scriptlets, `<%= %>` expressions, `<%! %>` declarations, and `<%= %>` inside
+custom tag attributes (`<html:text value="<%= StringUtils.trim(v) %>"/>`). **It changes nothing**
+except adding markers. Each call is marked in the page (`~~(Static method call
+com.acme.util.DateUtils.format())~~>`) and listed in the `JspStaticMethodCalls` data table:
+
+| Column | Description |
+|---|---|
+| `sourcePath` | The page |
+| `line` | Line of the call |
+| `className` | The class, fully qualified through the page's imports when that's unambiguous; otherwise as written |
+| `method` | The method name |
+| `candidates` | When a wildcard import makes the class ambiguous, the classes it may be, e.g. `java.util.Collections, Collections` |
+| `context` | `scriptlet`, `expression`, `declaration`, or `tag attribute` |
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `exclusions` | `List<String>` | none | Calls not to report, as patterns matched against `fully.qualified.Class.method`. `*` matches within one name segment, `**` across segments. A call with an ambiguous class is excluded if any of its candidates matches. |
+
+```java
+new FindStaticMethodCalls(List.of(
+        "java.lang.Math.*",                       // every Math method
+        "java.lang.Integer.parseInt",             // one method
+        "org.apache.commons.lang.StringUtils.*",  // a utility class Thymeleaf can call with T(...)
+        "com.acme.util.**"))                      // a whole package and its subpackages
+```
+
+**How calls are recognized.** There is no type checker, so it goes by Java naming conventions:
+`Class.method(…)` with a capitalized class name, `Outer.Inner.method(…)`, `Class.<T>method(…)`,
+or a fully qualified `com.acme.Util.method(…)`. These are not counted as static calls:
+
+- calls on a capitalized variable the page declares,
+- constructors (`new Outer.Inner()`),
+- instance methods on constants (`Status.ACTIVE.name()`),
+- anything inside string literals or comments.
+
+**How classes are resolved.** The page's `<%@ page import %>`s are used, including those in
+included files, which are compiled into the same servlet.
+
+- An explicit import, or a common `java.lang` class like `Integer` or `Math`, gives the full name.
+- A wildcard import gives a list of candidates instead.
+- Calls inside an included file are reported for that file, not for each page that includes it.
+
 ### `FindJspProblems`
 
 An analysis recipe that finds structural and readability problems. **It changes nothing.** It
