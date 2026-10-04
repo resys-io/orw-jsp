@@ -7,8 +7,8 @@ plus recipes that clean up and analyze JSP pages.
 
 | Module | Artifact | Contents |
 |---|---|---|
-| `parser` | `io.resys.openrewrite:resys-openrewrite-jsp-parser` | The JSP syntax tree, `JspParser`, visitors, printer, and the `Assertions.jsp(...)` test helper |
-| `receipes` | `io.resys.openrewrite:resys-openrewrite-jsp-receipes` | The recipes described below |
+| `parser` | `io.resys.orw:resys-orw-jsp-parser` | The JSP syntax tree, `JspParser`, visitors, printer, and the `Assertions.jsp(...)` test helper |
+| `receipes` | `io.resys.orw:resys-orw-jsp-receipes` | The recipes described below |
 
 Both are version `1.0-SNAPSHOT`, built for Java 21 against OpenRewrite 8.90.4.
 
@@ -109,7 +109,7 @@ supported, and any DTD a TLD references is never downloaded.
 
 ## Recipes
 
-All recipes are in the `io.resys.openrewrite.jsp.receipes` package.
+All recipes are in the `io.resys.orw.jsp.receipes` package.
 
 ### `RemoveUnusedTaglibs`
 

@@ -11,22 +11,22 @@ An [OpenRewrite](https://docs.openrewrite.org/) language module for JSP: a Lossl
 recipes read, search, and rewrite `.jsp`/`.jspf` files the same way `rewrite-java`, `rewrite-xml`,
 etc. do for their languages.
 
-Root coordinates: `io.resys.openrewrite:resys-openrewrite-jsp:1.0-SNAPSHOT` (a `pom`-packaged
+Root coordinates: `io.resys.orw:resys-orw-jsp:1.0-SNAPSHOT` (a `pom`-packaged
 reactor, no code of its own). Java 21, built against OpenRewrite 8.90.4 (`rewrite-bom`) and JUnit
 6.1.3 (`junit-bom`), both pinned in the root `pom.xml` and inherited by every module.
 
 **Note on spelling:** the recipes module and its package are spelled `receipes` (not `recipes`)
-throughout — `artifactId=resys-openrewrite-jsp-receipes`, package
-`io.resys.openrewrite.jsp.receipes`. This is a pre-existing typo baked into the directory layout,
+throughout — `artifactId=resys-orw-jsp-receipes`, package
+`io.resys.orw.jsp.receipes`. This is a pre-existing typo baked into the directory layout,
 artifactId, and package name consistently; match it exactly in new code rather than "fixing" only
 part of it (which would just create an inconsistent mix of both spellings).
 
 ## Modules
 
-- **`parser`** (`resys-openrewrite-jsp-parser`) — the LST itself: `Jsp` tree model, `JspParser`,
+- **`parser`** (`resys-orw-jsp-parser`) — the LST itself: `Jsp` tree model, `JspParser`,
   `JspVisitor`/`JspIsoVisitor`, `JspPrinter`, and the `Assertions.jsp(...)` test helper. See
   **Parser architecture** below.
-- **`receipes`** (`resys-openrewrite-jsp-receipes`) — `Recipe` subclasses built on the parser, e.g.
+- **`receipes`** (`resys-orw-jsp-receipes`) — `Recipe` subclasses built on the parser, e.g.
   `RemoveUnusedTaglibs`. Depends on `parser`. See **Recipes** below.
 
 Both modules follow the same dependency shape: `lombok` and `org.jetbrains:annotations` as

@@ -57,8 +57,8 @@ import java.util.Set;
  *     {@code scriptless} one), {@code UNKNOWN_EL_FUNCTION} - a custom tag or EL function call that
  *     doesn't match its library's tag library descriptor (TLD), with a "did you mean" suggestion
  *     for near misses. Only checked for taglibs whose TLD the parser resolved (see
- *     {@link io.resys.openrewrite.jsp.JspParser.Builder#taglib} and
- *     {@link io.resys.openrewrite.jsp.JspParser.Builder#tldSearchPath}); a TLD's {@code <variable>}
+ *     {@link io.resys.orw.jsp.JspParser.Builder#taglib} and
+ *     {@link io.resys.orw.jsp.JspParser.Builder#tldSearchPath}); a TLD's {@code <variable>}
  *     declarations also make {@code VARIABLE_FROM_INCLUDE} exact for its tags.</li>
  *     <li>{@code UNRESOLVED_INCLUDE} - a static include that could not be resolved; tag balance is
  *     then not checked for the page.</li>
