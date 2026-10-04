@@ -5,11 +5,11 @@
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <artifactId>resys-openrewrite-jsp</artifactId>
-    <groupId>io.resys.openrewrite</groupId>
+    <artifactId>resys-orw-jsp</artifactId>
+    <groupId>io.resys.orw</groupId>
     <version>1.0-SNAPSHOT</version>
   </parent>
-  <artifactId>resys-openrewrite-jsp-parser</artifactId>
+  <artifactId>resys-orw-jsp-parser</artifactId>
 
 
   <dependencyManagement>

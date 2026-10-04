@@ -4,8 +4,8 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>io.resys.openrewrite</groupId>
-  <artifactId>resys-openrewrite-jsp</artifactId>
+  <groupId>io.resys.orw</groupId>
+  <artifactId>resys-orw-jsp</artifactId>
   <version>1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
 
@@ -37,13 +37,13 @@
         <scope>import</scope>
       </dependency>
       <dependency>
-        <groupId>io.resys.openrewrite</groupId>
-        <artifactId>resys-openrewrite-jsp-parser</artifactId>
+        <groupId>io.resys.orw</groupId>
+        <artifactId>resys-orw-jsp-parser</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>io.resys.openrewrite</groupId>
-        <artifactId>resys-openrewrite-jsp-receipes</artifactId>
+        <groupId>io.resys.orw</groupId>
+        <artifactId>resys-orw-jsp-receipes</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>
@@ -52,6 +52,8 @@
   <modules>
     <module>parser</module>
     <module>receipes</module>
+    <module>tester</module>
+    <module>tester-example</module>
   </modules>
 
   <build>

@@ -506,7 +506,7 @@ reports each problem in two ways:
 - **A marker in the source** (`SearchResult`), shown in OpenRewrite diffs as
   `~~(RULE: message)~~>` right where the problem starts. A problem inside an included file is
   marked on the page's `<%@ include %>` line.
-- **A row in the `JspProblems` data table** (`io.resys.openrewrite.jsp.receipes.table.JspProblems`),
+- **A row in the `JspProblems` data table** (`table.io.resys.orw.jsp.receipes.JspProblems`),
   read with `RecipeRun#getDataTableRows(JspProblems.class)`:
 
 | Column | Description |

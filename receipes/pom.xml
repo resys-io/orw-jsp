@@ -5,11 +5,11 @@
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <artifactId>resys-openrewrite-jsp</artifactId>
-    <groupId>io.resys.openrewrite</groupId>
+    <artifactId>resys-orw-jsp</artifactId>
+    <groupId>io.resys.orw</groupId>
     <version>1.0-SNAPSHOT</version>
   </parent>
-  <artifactId>resys-openrewrite-jsp-receipes</artifactId>
+  <artifactId>resys-orw-jsp-receipes</artifactId>
 
 
   <dependencyManagement>
@@ -33,8 +33,8 @@
 
   <dependencies>
     <dependency>
-      <artifactId>resys-openrewrite-jsp-parser</artifactId>
-      <groupId>io.resys.openrewrite</groupId>
+      <artifactId>resys-orw-jsp-parser</artifactId>
+      <groupId>io.resys.orw</groupId>
     </dependency>
     <!-- Reads struts-config.xml (form beans, action mappings) for FindModelAttributes. -->
     <dependency>
