@@ -1,0 +1,68 @@
+# Publishes a release to Maven Central when a GitHub Release is published.
+#
+# The release's tag gives the version: tag v1.2.3 publishes 1.2.3. The version is set for this
+# build only; main keeps its -SNAPSHOT version and nothing is committed back.
+#
+# Needs these secrets (repository or "maven-central" environment):
+#   CENTRAL_USERNAME, CENTRAL_PASSWORD  a Central Portal user token (central.sonatype.com,
+#                                       for a verified io.github.resys-io namespace)
+#   GPG_PRIVATE_KEY                     an ASCII-armored private key whose public key is on a
+#                                       public key server (e.g. keys.openpgp.org)
+#   GPG_PASSPHRASE                      its passphrase
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to Maven Central
+    runs-on: ubuntu-latest
+    environment: maven-central
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version from the release tag
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)*$ ]] || [[ "$version" == *SNAPSHOT* ]]; then
+            echo "::error::Release tag '$TAG' must be vX.Y.Z (optionally with a qualifier, e.g. v1.2.0-RC1), not a SNAPSHOT"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Set the version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: >
+          mvn --batch-mode --no-transfer-progress versions:set
+          -DnewVersion="$VERSION" -DgenerateBackupPoms=false -DprocessAllModules
+
+      - name: Build, test, sign, and publish
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: mvn --batch-mode --no-transfer-progress -P release deploy

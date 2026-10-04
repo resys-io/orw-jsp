@@ -1,13 +1,60 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  child.*.inherit.append.path="false": the modules share this project's URL and repository; by
+  default Maven would append each module's artifactId to them, giving URLs that don't exist.
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+         child.project.url.inherit.append.path="false">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>io.resys.orw</groupId>
+  <groupId>io.github.resys-io</groupId>
   <artifactId>resys-orw-jsp</artifactId>
   <version>1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
+
+  <name>OpenRewrite JSP</name>
+  <description>
+    An OpenRewrite language module for JSP (a lossless parser, printer, and visitors), recipes that
+    analyze and migrate JSP pages (e.g. scriptlets to JSTL), and a tester that renders pages and
+    their migrated Thymeleaf templates against shared fixtures.
+  </description>
+  <url>https://github.com/resys-io/orw-jsp</url>
+  <inceptionYear>2026</inceptionYear>
+
+  <organization>
+    <name>Resys</name>
+  </organization>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Tomi Pakarinen</name>
+      <organization>Resys</organization>
+    </developer>
+  </developers>
+
+  <scm child.scm.connection.inherit.append.path="false"
+       child.scm.developerConnection.inherit.append.path="false"
+       child.scm.url.inherit.append.path="false">
+    <connection>scm:git:https://github.com/resys-io/orw-jsp.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/resys-io/orw-jsp.git</developerConnection>
+    <url>https://github.com/resys-io/orw-jsp</url>
+    <tag>HEAD</tag>
+  </scm>
+
+  <issueManagement>
+    <system>GitHub Issues</system>
+    <url>https://github.com/resys-io/orw-jsp/issues</url>
+  </issueManagement>
 
   <properties>
     <maven.compiler.source>21</maven.compiler.source>
@@ -37,12 +84,12 @@
         <scope>import</scope>
       </dependency>
       <dependency>
-        <groupId>io.resys.orw</groupId>
+        <groupId>io.github.resys-io</groupId>
         <artifactId>resys-orw-jsp-parser</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>io.resys.orw</groupId>
+        <groupId>io.github.resys-io</groupId>
         <artifactId>resys-orw-jsp-receipes</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -57,6 +104,30 @@
   </modules>
 
   <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-source-plugin</artifactId>
+          <version>3.4.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-javadoc-plugin</artifactId>
+          <version>3.12.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-gpg-plugin</artifactId>
+          <version>3.2.8</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>versions-maven-plugin</artifactId>
+          <version>2.22.0</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -65,5 +136,89 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!--
+      Publishing to Maven Central (the Central Portal), used by .github/workflows/release.yml:
+        mvn -P release deploy
+      Adds the sources and javadoc JARs and the GPG signatures Central requires, and uploads
+      everything but tester-example. Needs the server "central" in settings.xml (a Central Portal
+      user token) and a GPG key (passphrase in MAVEN_GPG_PASSPHRASE).
+    -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <goals>
+                  <goal>jar-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <configuration>
+              <!--
+                Javadoc runs on the sources without Lombok's annotation processing, so links to
+                Lombok-generated getters can't resolve; such gaps mustn't fail a release.
+              -->
+              <doclint>none</doclint>
+              <quiet>true</quiet>
+            </configuration>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+                <configuration>
+                  <!-- Non-interactive: the passphrase comes from MAVEN_GPG_PASSPHRASE. -->
+                  <gpgArguments>
+                    <arg>--pinentry-mode</arg>
+                    <arg>loopback</arg>
+                  </gpgArguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.11.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>true</autoPublish>
+              <!-- The release job succeeds only once Central has actually published. -->
+              <waitUntil>published</waitUntil>
+              <excludeArtifacts>
+                <excludeArtifact>resys-orw-jsp-tester-example</excludeArtifact>
+              </excludeArtifacts>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 
 </project>

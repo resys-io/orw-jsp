@@ -4,12 +4,14 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <groupId>io.resys.orw</groupId>
+    <groupId>io.github.resys-io</groupId>
     <artifactId>resys-orw-jsp</artifactId>
     <version>1.0-SNAPSHOT</version>
   </parent>
 
   <artifactId>resys-orw-jsp-tester</artifactId>
+  <name>OpenRewrite JSP tester</name>
+  <description>Renders JSP pages (embedded Tomcat) and the Thymeleaf templates they were migrated to (Spring MVC) against shared fixtures, to test that a migration keeps the output the same.</description>
 
   <properties>
     <!--
@@ -67,7 +69,7 @@
 
     <!-- Scans the pages for the tags of libraries to mock. -->
     <dependency>
-      <groupId>io.resys.orw</groupId>
+      <groupId>io.github.resys-io</groupId>
       <artifactId>resys-orw-jsp-parser</artifactId>
     </dependency>
 

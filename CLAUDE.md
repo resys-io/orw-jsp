@@ -11,7 +11,7 @@ An [OpenRewrite](https://docs.openrewrite.org/) language module for JSP: a Lossl
 recipes read, search, and rewrite `.jsp`/`.jspf` files the same way `rewrite-java`, `rewrite-xml`,
 etc. do for their languages.
 
-Root coordinates: `io.resys.orw:resys-orw-jsp:1.0-SNAPSHOT` (a `pom`-packaged
+Root coordinates: `io.github.resys-io:resys-orw-jsp:1.0-SNAPSHOT` (a `pom`-packaged
 reactor, no code of its own). Java 21, built against OpenRewrite 8.90.4 (`rewrite-bom`) and JUnit
 6.1.3 (`junit-bom`), both pinned in the root `pom.xml` and inherited by every module.
 
@@ -68,6 +68,22 @@ aborts annotation processing for the whole compilation unit) surface as a spurio
 `does not override abstract method getDescription()` on unrelated Lombok-based `Recipe` classes in
 the same module. See `org.openrewrite.properties.PropertiesParser#extractContent` upstream for the
 same pattern (`Properties.@Nullable Content`), and `RemoveUnusedImports#rewritePageDirective` here.
+
+## Releases and CI
+
+- **License:** Apache 2.0 (`LICENSE`, `NOTICE`). The groupId is `io.github.resys-io`, the
+  namespace verified on the Central Portal. Java packages stay `io.resys.orw.*`.
+- **Workflows:** `.github/workflows/build.yml` is a reusable workflow (`workflow_call`) running
+  `mvn verify`. `pull-request.yml` and `main.yml` call it. `release.yml` runs when a GitHub
+  Release is published: it takes the version from the tag (`v1.2.3` → `1.2.3`), sets it with
+  `versions:set` for that build only, and runs `mvn -P release deploy`.
+- **The `release` profile** adds sources and Javadoc JARs, GPG signing, and
+  `central-publishing-maven-plugin`, which excludes `tester-example` (that module also sets
+  `maven.deploy.skip`). Javadoc runs with `doclint` off, because links to Lombok-generated
+  getters can't resolve. Check it locally with `mvn -P release -Dgpg.skip -DskipTests verify`.
+- **POM metadata** (url, scm, licenses, developers), which Central requires, is in the root POM.
+  The `child.*.inherit.append.path="false"` attributes stop Maven from appending each module's
+  artifactId to the inherited URLs. Each module has its own `<name>` and `<description>`.
 
 ## Parser architecture (`parser` module)
 

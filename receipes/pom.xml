@@ -6,10 +6,12 @@
 
   <parent>
     <artifactId>resys-orw-jsp</artifactId>
-    <groupId>io.resys.orw</groupId>
+    <groupId>io.github.resys-io</groupId>
     <version>1.0-SNAPSHOT</version>
   </parent>
   <artifactId>resys-orw-jsp-receipes</artifactId>
+  <name>OpenRewrite JSP recipes</name>
+  <description>OpenRewrite recipes that analyze JSP pages and migrate them, e.g. from scriptlets to JSTL.</description>
 
 
   <dependencyManagement>
@@ -34,7 +36,7 @@
   <dependencies>
     <dependency>
       <artifactId>resys-orw-jsp-parser</artifactId>
-      <groupId>io.resys.orw</groupId>
+      <groupId>io.github.resys-io</groupId>
     </dependency>
     <!-- Reads struts-config.xml (form beans, action mappings) for FindModelAttributes. -->
     <dependency>

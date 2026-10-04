@@ -4,12 +4,19 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <groupId>io.resys.orw</groupId>
+    <groupId>io.github.resys-io</groupId>
     <artifactId>resys-orw-jsp</artifactId>
     <version>1.0-SNAPSHOT</version>
   </parent>
 
   <artifactId>resys-orw-jsp-tester-example</artifactId>
+  <name>OpenRewrite JSP tester example</name>
+  <description>An example web application tested with the tester (not published).</description>
+
+  <properties>
+    <!-- An example and testbed, not a library: never published (see also the root release profile). -->
+    <maven.deploy.skip>true</maven.deploy.skip>
+  </properties>
 
   <!--
     A small Struts 1 style web application (src/main/webapp) whose pages are tested with the tester
@@ -49,7 +56,7 @@
     </dependency>
 
     <dependency>
-      <groupId>io.resys.orw</groupId>
+      <groupId>io.github.resys-io</groupId>
       <artifactId>resys-orw-jsp-tester</artifactId>
       <version>${project.version}</version>
       <scope>test</scope>

@@ -7,10 +7,10 @@ plus recipes that clean up and analyze JSP pages.
 
 | Module | Artifact | Contents |
 |---|---|---|
-| `parser` | `io.resys.orw:resys-orw-jsp-parser` | The JSP syntax tree, `JspParser`, visitors, printer, and the `Assertions.jsp(...)` test helper |
-| `receipes` | `io.resys.orw:resys-orw-jsp-receipes` | The recipes described below |
-| `tester` | `io.resys.orw:resys-orw-jsp-tester` | Renders pages with embedded Tomcat 10.1 (Jakarta EE), and the Thymeleaf templates they were migrated to with Spring MVC, for tests, with fixtures and tag mocking, to check that a migration keeps the output the same (see [Testing pages](#testing-pages-the-tester)) |
-| `tester-example` | `io.resys.orw:resys-orw-jsp-tester-example` | A small Struts 1 (weblegacy 1.5, Jakarta EE) web application tested with the tester; an example and a testbed |
+| `parser` | `io.github.resys-io:resys-orw-jsp-parser` | The JSP syntax tree, `JspParser`, visitors, printer, and the `Assertions.jsp(...)` test helper |
+| `receipes` | `io.github.resys-io:resys-orw-jsp-receipes` | The recipes described below |
+| `tester` | `io.github.resys-io:resys-orw-jsp-tester` | Renders pages with embedded Tomcat 10.1 (Jakarta EE), and the Thymeleaf templates they were migrated to with Spring MVC, for tests, with fixtures and tag mocking, to check that a migration keeps the output the same (see [Testing pages](#testing-pages-the-tester)) |
+| `tester-example` | `io.github.resys-io:resys-orw-jsp-tester-example` | A small Struts 1 (weblegacy 1.5, Jakarta EE) web application tested with the tester; an example and a testbed |
 
 All are version `1.0-SNAPSHOT`, built for Java 21 against OpenRewrite 8.90.4.
 
@@ -731,7 +731,7 @@ example.
 
 ```xml
 <dependency>
-  <groupId>io.resys.orw</groupId>
+  <groupId>io.github.resys-io</groupId>
   <artifactId>resys-orw-jsp-tester</artifactId>
   <version>1.0-SNAPSHOT</version>
   <scope>test</scope>
@@ -1022,3 +1022,37 @@ class MyRecipeTest implements RewriteTest {
   aren't parsed. Taglibs declared with `tagdir="..."` aren't resolved, so their tags aren't validated.
 - **Approximate Java and EL analysis:** variable and import usage is detected by text matching,
   not by a real Java or EL parser.
+
+## Continuous integration and releases
+
+GitHub Actions workflows in `.github/workflows`:
+
+- **`pull-request.yml`** builds and tests (`mvn verify`) every pull request to `main`.
+- **`main.yml`** does the same on every push to `main`.
+- **`release.yml`** publishes to Maven Central when a GitHub Release is published.
+
+Both build workflows call the shared `build.yml`. When tests fail, it uploads the Surefire reports.
+
+To release, create a GitHub Release with a tag such as `v1.2.3`. The workflow publishes version
+`1.2.3` of `parser`, `receipes` and `tester`, with sources, Javadoc and GPG signatures, under the
+group `io.github.resys-io`. `tester-example` is not published. The version is set only for the
+release build: `main` keeps its `-SNAPSHOT` version and nothing is committed back.
+
+The release workflow needs these repository secrets. They can also be secrets of a `maven-central`
+environment, which can require approval:
+
+| Secret | Value |
+|---|---|
+| `CENTRAL_USERNAME`, `CENTRAL_PASSWORD` | A user token from [central.sonatype.com](https://central.sonatype.com) for the verified namespace `io.github.resys-io` |
+| `GPG_PRIVATE_KEY` | An ASCII-armored private key (`gpg --armor --export-secret-keys <id>`). Its public key must be on a public key server such as keys.openpgp.org |
+| `GPG_PASSPHRASE` | The key's passphrase |
+
+To check the release build locally without signing or uploading:
+
+```sh
+mvn -P release -Dgpg.skip -DskipTests verify
+```
+
+## License
+
+Copyright 2026 Resys. Licensed under the [Apache License, Version 2.0](LICENSE).

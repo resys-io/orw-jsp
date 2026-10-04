@@ -6,10 +6,12 @@
 
   <parent>
     <artifactId>resys-orw-jsp</artifactId>
-    <groupId>io.resys.orw</groupId>
+    <groupId>io.github.resys-io</groupId>
     <version>1.0-SNAPSHOT</version>
   </parent>
   <artifactId>resys-orw-jsp-parser</artifactId>
+  <name>OpenRewrite JSP parser</name>
+  <description>A lossless parser, printer, and visitors for JSP (Jakarta Server Pages), for OpenRewrite.</description>
 
 
   <dependencyManagement>
