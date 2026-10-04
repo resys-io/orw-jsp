@@ -218,11 +218,12 @@ final class ScriptletToJstlConverter {
             return 0;
         }
         if (!opener.prefix().isBlank()) {
-            out.add(new Jsp.Scriptlet(randomId(), "", Markers.EMPTY, opener.prefix()));
+            // Keeps the opener's id: what remains of a scriptlet stays traceable to it.
+            out.add(first.withCode(opener.prefix()));
         }
         out.addAll(replacement);
         if (!closer.suffix().isBlank()) {
-            out.add(new Jsp.Scriptlet(randomId(), "", Markers.EMPTY, closer.suffix()));
+            out.add(((Jsp.Scriptlet) nodes.get(closerIndex)).withCode(closer.suffix()));
         }
         usedCore = true;
         return closerIndex - start + 1;

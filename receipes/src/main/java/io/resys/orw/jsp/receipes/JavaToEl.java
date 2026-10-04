@@ -255,6 +255,9 @@ final class JavaToEl {
                     return new Implicit(name);
                 }
                 if (!elVisible.contains(name)) {
+                    if (Character.isUpperCase(name.charAt(0))) {
+                        throw new Fail("'" + name + "' is a class: static members can't be translated");
+                    }
                     throw new Fail("'" + name + "' is a Java variable EL can't see (not mirrored into a page " +
                                    "attribute)");
                 }

@@ -156,6 +156,11 @@ disabled, because old JSP 1.1 TLDs carry a `DOCTYPE` pointing at a DTD URL. JSP 
   a sub-tree (top-level EL in template text *is* a first-class `Jsp.ExpressionLanguage` node).
 - The all-XML "JSP document" syntax (`.jspx`) and tag files (`.tag`/`.tagx`) are not handled.
 
+**Request-time attribute values.** A quoted attribute value that starts with `<%=` is read up to its
+`%>` (then the closing quote), as Jasper does. So `value="<%= bean.get("x") %>"`, with unescaped
+quotes inside the Java, parses. Struts 1 pages are full of these, and before this rule existed
+they failed to parse entirely (see `JspParserTest#requestTimeAttributeValueWithQuotesInsideTheExpression`).
+
 `Declaration`/`Scriptlet`/`ExpressionScriptlet` expose both `getCode()` (with `%\>` escapes
 resolved to a literal `%>`) and `getCodeSource()` (raw, escapes intact) — the same
 decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-continuations.
@@ -236,6 +241,17 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   - **EL availability:** its scanner reads any parsed `web.xml` (root `web-app`). A missing
     `version` (DTD-based) or one below 2.4 means EL is off by default, so nothing changes.
     `isELIgnored="true"` pages are skipped too.
+- **`FindUnmigratableScriptlets`** — the step-5 analysis. `ManualMigrationAnalyzer` *simulates*
+  `JavaVariableMigrator(mirrorAll)` + `ScriptletToJstlConverter` on the page. Any original Java node
+  whose id still exists in the simulated result as a Java node is `MANUAL`. Its reasons are the
+  converter's `Conversion` failures and the variable migrator's `SKIPPED` reasons for the variables
+  it declares. Its `Category`s come from regex classification, most specific first.
+  - **Ids must survive the simulation**, which is why the converter keeps the original node's id when
+    it splits a scriptlet: what's left of `<% stmt; if (c) { %>` (`first.withCode(prefix)`) and of a
+    closer's suffix. `withCode`/`withBody` keep ids too, so a scriptlet that only had a mirror
+    inserted counts as surviving.
+  - **Tests:** they use `spec.after(actual -> actual)` to assert on data tables without spelling out
+    every marker.
 - **`ConvertScriptletsToJstl`** — converts scriptlet `if`/`else`/loops/assignments/outputs to JSTL
   and EL. It is meant to run after `MigrateJavaVariablesToPageAttributes(mirrorAll)`, and
   `ConvertScriptletsToJstlTest#pipelineFromRawScriptletsToJstl` runs both together.

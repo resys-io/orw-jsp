@@ -498,6 +498,50 @@ declare it, either itself or through an included file. The functions library is 
 JSTL 1.0 evaluates EL itself, so with `jstlVersion: 1.0` it works even with EL disabled in the
 container. Outputs are then written as `<c:out value="${…}" escapeXml="false"/>`.
 
+### `FindUnmigratableScriptlets`
+
+An analysis recipe that finds the Java the automated migration can't remove. That migration is
+`MigrateJavaVariablesToPageAttributes` with `mirrorAll`, followed by `ConvertScriptletsToJstl`.
+For each construct that stays Java, it reports why and what kind of manual work it needs. **It
+only adds markers; pages are otherwise unchanged.**
+
+It simulates that migration on each page, then checks every Java construct against the result.
+Those are scriptlets, `<%= %>` expressions, `<%! %>` declarations, and `<%= %>` in custom tag
+attributes. Each construct gets one of two statuses:
+
+- **`MIGRATABLE`**: the migration removes it, so running those two recipes is enough.
+- **`MANUAL`**: it stays Java. It's marked in the page
+  (`~~(Manual migration (DATA_ACCESS, VARIABLE): …)~~>`) and listed with the reasons the migration
+  gave, its categories, and a hint.
+
+Run it on untouched pages to see what the migration will leave, or after the migration to list
+what's left. It takes one option, `jstlVersion`, used as in `ConvertScriptletsToJstl`.
+
+| Category | Means | Hint |
+|---|---|---|
+| `DECLARATION` | `<%! %>` fields and methods | Move them into a Java class (a helper bean, or the controller) |
+| `DATA_ACCESS` | JDBC, JNDI, JPA, `*Dao`/`*Service`/`*Manager` calls | Move into the controller or a service; pass the results as model attributes |
+| `REQUEST_SESSION_STATE` | `setAttribute`, `removeAttribute`, `invalidate` (not the migration's own mirrors) | Move into the controller |
+| `RESPONSE_CONTROL` | redirects, forwards, `return;`, status codes, headers, cookies | Move into the controller |
+| `OUTPUT_WRITING` | `out.print(…)` | Write it as template text |
+| `EXCEPTION_HANDLING` | `try`/`catch`/`throw` | Handle errors in the controller |
+| `STATIC_CALL` | `Class.method(…)` | Call it in the controller, or expose it to the view as a helper |
+| `OBJECT_CREATION` | `new …` | Create the objects in the controller |
+| `CONTROL_FLOW` | an `if`/loop that can't convert (the reason says why) | Make its expression expressible in EL, or compute it in the controller |
+| `BLOCK_DELIMITER` | a `}` or `else` of a block that stays Java | Migrate the block it belongs to |
+| `VARIABLE` | variable state kept in Java | Compute it in the controller and pass it as a model attribute |
+| `EXPRESSION` | a `<%= %>` that can't become EL | Compute it in the controller, or use getters EL can read |
+| `TAG_ATTRIBUTE` | `<%= %>` in a custom tag attribute; the reason shows its EL form if it has one | Migrate it together with the tag |
+| `OTHER` | anything else | Rewrite as JSTL/EL, or move into the controller |
+
+Categories are recognized by text patterns, so treat them as a guide. Results go to two data
+tables:
+
+- **`JspManualMigrations`**, one row per construct: `sourcePath`, `line`, `kind`, `status`,
+  `categories`, `reasons`, `hint`, and `code` (one line, shortened).
+- **`JspMigrationEffort`**, one row per page: `javaConstructs`, `migratable`, `manual`, and
+  `manualJavaLines`, as a rough estimate of the manual effort.
+
 ### `FindJspProblems`
 
 An analysis recipe that finds structural and readability problems. **It changes nothing.** It
