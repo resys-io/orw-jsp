@@ -45,6 +45,13 @@ import java.util.Set;
  *     single tag split by an include ({@code <div <%@ include file="attrs.jspf" %>>}, or an
  *     included file that ends mid-tag). With {@link #getAllowSplitBetweenIncludedFiles()}, an element
  *     whose start and end tags are both in included files is not reported.</li>
+ *     <li>{@code VARIABLE_FROM_INCLUDE} - the page uses a variable defined only in a file it statically
+ *     includes: a Java variable declared at the top level of a scriptlet, a field or method from a
+ *     {@code <%! %>} declaration, a {@code <jsp:useBean>}, or a scoped attribute
+ *     ({@code <c:set var>} and other {@code var}-exporting tags, {@code request.setAttribute(...)}),
+ *     read from Java, EL, {@code getAttribute("...")}, or {@code <jsp:getProperty name>}. Reported once
+ *     per variable, at its first use after the include. A page that defines the name itself, or a
+ *     variable only visible inside a block or a {@code <c:forEach>} body, is not reported.</li>
  *     <li>{@code UNRESOLVED_INCLUDE} - a static include that could not be resolved; tag balance is
  *     then not checked for the page.</li>
  * </ul>
@@ -67,7 +74,8 @@ public class FindJspProblems extends ScanningRecipe<FindJspProblems.Accumulator>
     String description = "Finds unbalanced tags (missing end tags, end tags without a start tag, end tags " +
                           "with attributes), Java scriptlets and custom tags inside HTML tags, markup whose " +
                           "structure depends on which branch of a scriptlet or `<c:if>` runs, JSP code inside " +
-                          "HTML comments (where it still runs), and other " +
+                          "HTML comments (where it still runs), pages using variables defined in an included " +
+                          "file, and other " +
                           "constructs that make JSP pages hard to read.";
 
     @Option(displayName = "Maximum scriptlet lines",

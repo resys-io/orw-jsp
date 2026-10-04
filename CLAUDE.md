@@ -178,7 +178,12 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   (`SCRIPTLET_IN_HTML_TAG`), and readability smells (`ELEMENT_CROSSES_BLOCK`, `GENERATED_ATTRIBUTE`,
   `HTML_IN_SCRIPTLET`, `LARGE_SCRIPTLET`, and `JSP_IN_HTML_COMMENT`, which fires when JSP code
   inside `<!-- -->` still runs and asks whether `<%-- --%>` was meant; it is reported once per
-  comment and EL is deliberately exempt). The logic lives in `JspPageAnalyzer`. Because HTML is
+  comment and EL is deliberately exempt), and `VARIABLE_FROM_INCLUDE`, for a page that uses a Java
+  variable/field/method, bean or scoped attribute defined only in a file it includes. The
+  definitions and uses are found by regex in `JspVariables`, not by a real Java or EL parser.
+  Java declarations only count when they are at the top level: text nested in `()`/`{}` is
+  blanked first, and the analyzer tracks the `javaDepth` of blocks left open across scriptlets.
+  A definition in the page itself shadows the included one. The logic lives in `JspPageAnalyzer`. Because HTML is
   only `Jsp.Text` in the LST, it runs its own small HTML tokenizer over the text nodes in document
   order. The tokenizer's state carries across JSP nodes, which is what makes "a scriptlet inside
   `<option ...>`" visible at all. Open elements sit on a stack interleaved with *barriers* (a JSP

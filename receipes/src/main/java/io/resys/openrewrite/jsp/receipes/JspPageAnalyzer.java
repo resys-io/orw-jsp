@@ -12,6 +12,7 @@ import org.openrewrite.marker.SearchResult;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -50,6 +51,7 @@ final class JspPageAnalyzer {
         HTML_IN_SCRIPTLET(false),
         LARGE_SCRIPTLET(false),
         JSP_IN_HTML_COMMENT(false),
+        VARIABLE_FROM_INCLUDE(false),
         UNRESOLVED_INCLUDE(false);
 
         /**
@@ -150,6 +152,16 @@ final class JspPageAnalyzer {
     private @Nullable Location tagLocation;
     private @Nullable Location commentLocation;
     private boolean commentReported;
+
+    // Variables defined in included files, by the name the page would use them by.
+    private record IncludedDefinition(JspVariables.Kind kind, Location location) {
+    }
+
+    private final Map<String, IncludedDefinition> includedJavaVariables = new HashMap<>();
+    private final Map<String, IncludedDefinition> includedJavaMethods = new HashMap<>();
+    private final Map<String, IncludedDefinition> includedScopedVariables = new HashMap<>();
+    private final Set<String> reportedVariables = new HashSet<>();
+    private int javaDepth;
 
     /**
      * @param fragment whether the page is a fragment (a {@code .jspf}, or a file other pages
@@ -258,6 +270,9 @@ final class JspPageAnalyzer {
             } else if (node instanceof Jsp.ExpressionScriptlet || node instanceof Jsp.ExpressionLanguage) {
                 if (node instanceof Jsp.ExpressionScriptlet) {
                     checkInHtmlComment(node, "an expression <%= %>");
+                    useJava(((Jsp.ExpressionScriptlet) node).getCode(), node);
+                } else {
+                    useEl(((Jsp.ExpressionLanguage) node).getExpression(), node);
                 }
                 visitExpression(node, node instanceof Jsp.ExpressionLanguage ? "EL expression" : "expression");
                 advance(print(node));
@@ -267,6 +282,78 @@ final class JspPageAnalyzer {
                 advance(print(node));
             }
         }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Variables defined in included files
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * Records a definition. In an included file, it's one the page may come to depend on; in the
+     * page itself, it shadows any included definition of the same name from here on.
+     */
+    private void define(JspVariables.Definition definition, Location location) {
+        String name = definition.name();
+        JspVariables.Kind kind = definition.kind();
+        IncludedDefinition included = new IncludedDefinition(kind, location);
+        if (kind == JspVariables.Kind.JAVA_METHOD) {
+            put(includedJavaMethods, name, included);
+            return;
+        }
+        if (kind.visibleToJava()) {
+            put(includedJavaVariables, name, included);
+        }
+        if (kind.visibleToEl()) {
+            put(includedScopedVariables, name, included);
+        }
+    }
+
+    private void put(Map<String, IncludedDefinition> definitions, String name, IncludedDefinition definition) {
+        if (includeAnchor != null) {
+            definitions.put(name, definition);
+        } else {
+            definitions.remove(name);
+        }
+    }
+
+    private void useJava(String code, Jsp node) {
+        if (includeAnchor != null) {
+            return;
+        }
+        for (JspVariables.Use use : JspVariables.javaUses(code)) {
+            Map<String, IncludedDefinition> definitions = use.scoped() ? includedScopedVariables :
+                    use.call() ? includedJavaMethods : includedJavaVariables;
+            reportUse(use.name(), definitions.get(use.name()), node);
+        }
+    }
+
+    private void useEl(String expression, Jsp node) {
+        if (includeAnchor != null) {
+            return;
+        }
+        for (String name : JspVariables.elUses(expression)) {
+            reportUse(name, includedScopedVariables.get(name), node);
+        }
+    }
+
+    private void useScoped(String name, Jsp node) {
+        if (includeAnchor == null) {
+            reportUse(name, includedScopedVariables.get(name), node);
+        }
+    }
+
+    /**
+     * Reports the first use of each variable the page takes from an included file.
+     */
+    private void reportUse(String name, @Nullable IncludedDefinition definition, Jsp node) {
+        if (definition == null || !reportedVariables.add(name)) {
+            return;
+        }
+        report(Rule.VARIABLE_FROM_INCLUDE, here(node), null, false,
+                "'" + name + "' is a " + definition.kind().description + " defined in included file " +
+                inFile(definition.location()) + ": the page depends on a variable it does not define itself, " +
+                "so it can't be read or changed on its own; define the variable in the page, or pass it " +
+                "explicitly (e.g. as a request attribute set before the include)");
     }
 
     /**
@@ -307,6 +394,8 @@ final class JspPageAnalyzer {
             Path savedFile = file;
             int savedLine = line;
             UUID savedAnchor = includeAnchor;
+            int savedJavaDepth = javaDepth;
+            javaDepth = 0;
             file = includedFile.getSourcePath();
             line = 1;
             if (includeAnchor == null) {
@@ -317,6 +406,7 @@ final class JspPageAnalyzer {
             file = savedFile;
             line = savedLine;
             includeAnchor = savedAnchor;
+            javaDepth = savedJavaDepth;
 
             if (inHtmlTag() && tagInInclude != tagBeforeInclude) {
                 report(Rule.TAG_SPLIT_ACROSS_FILES, location, null, false,
@@ -345,8 +435,18 @@ final class JspPageAnalyzer {
                     "Java " + kind + " of " + lines + " lines (more than " + maxScriptletLines + "): " +
                     "move the logic out of the page, e.g. into a servlet, bean, or tag");
         }
+        boolean declaration = node instanceof Jsp.Declaration;
+        for (JspVariables.Definition definition : JspVariables.javaDeclarations(code, declaration,
+                declaration ? 0 : javaDepth)) {
+            int definitionLine = location.line() + (int) code.substring(0, definition.offset()).chars()
+                    .filter(ch -> ch == '\n').count();
+            define(definition, new Location(file, definitionLine, location.anchor()));
+        }
+        // After recording the page's own declarations, which shadow included ones.
+        useJava(code, node);
         if (node instanceof Jsp.Scriptlet) {
             int[] braces = braces(code);
+            javaDepth = Math.max(0, javaDepth - braces[0]) + braces[1];
             for (int i = 0; i < braces[0]; i++) {
                 exitBlock(true);
             }
@@ -381,6 +481,20 @@ final class JspPageAnalyzer {
     private void visitTag(Jsp.Tag tag) {
         checkInHtmlComment(tag, "a JSP tag <" + tag.getName() + ">");
         Location location = here(tag);
+        for (Jsp.Attribute attribute : tag.getAttributes()) {
+            String value = attribute.getValue().getValue();
+            // Uses first: in <c:set var="x" value="${x + 1}"/>, the x read is the earlier one.
+            JspVariables.elInText(value).forEach(el -> useEl(el, tag));
+            JspVariables.expressionsInText(value).forEach(code -> useJava(code, tag));
+            if (("jsp:getProperty".equals(tag.getName()) || "jsp:setProperty".equals(tag.getName())) &&
+                "name".equals(attribute.getName())) {
+                useScoped(value, tag);
+            }
+            JspVariables.Definition definition = JspVariables.tagDefinition(tag.getName(), attribute.getName(), value);
+            if (definition != null) {
+                define(definition, location);
+            }
+        }
         String start = print(tag.isSelfClosing() ? tag : tag.withBody(List.of()).withClosing(null));
 
         if (inHtmlTag()) {

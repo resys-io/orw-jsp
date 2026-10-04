@@ -611,4 +611,111 @@ class FindJspProblemsTest implements RewriteTest {
                 )
         );
     }
+
+    @Test
+    void javaVariableFromIncludeUsedInPage() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ include file="init.jspf" %>
+                        <p>Hello <%= userName %></p>
+                        <% if (userName.isEmpty()) { out.print("anonymous"); } %>
+                        """,
+                        """
+                        <%@ include file="init.jspf" %>
+                        <p>Hello ~~(VARIABLE_FROM_INCLUDE: 'userName' is a Java variable defined in included file init.jspf line 2: the page depends on a variable it does not define itself, so it can't be read or changed on its own; define the variable in the page, or pass it explicitly (e.g. as a request attribute set before the include))~~><%= userName %></p>
+                        <% if (userName.isEmpty()) { out.print("anonymous"); } %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp(
+                        """
+                        <%
+                            String userName = request.getRemoteUser();
+                        %>
+                        """,
+                        spec -> spec.path("init.jspf")
+                )
+        );
+    }
+
+    @Test
+    void scopedVariablesFromIncludeUsedInPage() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ include file="init.jspf" %>
+                        <c:if test="${isAdmin}">admin</c:if>
+                        <p>${title} <%= request.getAttribute("section") %></p>
+                        <p><jsp:getProperty name="cart" property="size"/></p>
+                        """,
+                        """
+                        <%@ include file="init.jspf" %>
+                        ~~(VARIABLE_FROM_INCLUDE: 'isAdmin' is a scoped attribute defined in included file init.jspf line 1: the page depends on a variable it does not define itself, so it can't be read or changed on its own; define the variable in the page, or pass it explicitly (e.g. as a request attribute set before the include))~~><c:if test="${isAdmin}">admin</c:if>
+                        <p>~~(VARIABLE_FROM_INCLUDE: 'title' is a scoped attribute defined in included file init.jspf line 2: the page depends on a variable it does not define itself, so it can't be read or changed on its own; define the variable in the page, or pass it explicitly (e.g. as a request attribute set before the include))~~>${title} ~~(VARIABLE_FROM_INCLUDE: 'section' is a scoped attribute defined in included file init.jspf line 3: the page depends on a variable it does not define itself, so it can't be read or changed on its own; define the variable in the page, or pass it explicitly (e.g. as a request attribute set before the include))~~><%= request.getAttribute("section") %></p>
+                        <p>~~(VARIABLE_FROM_INCLUDE: 'cart' is a bean declared with <jsp:useBean> defined in included file init.jspf line 4: the page depends on a variable it does not define itself, so it can't be read or changed on its own; define the variable in the page, or pass it explicitly (e.g. as a request attribute set before the include))~~><jsp:getProperty name="cart" property="size"/></p>
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp(
+                        """
+                        <c:set var="isAdmin" value="${user.admin}"/>
+                        <fmt:message key="page.title" var="title"/>
+                        <% request.setAttribute("section", "home"); %>
+                        <jsp:useBean id="cart" class="shop.Cart" scope="session"/>
+                        """,
+                        spec -> spec.path("init.jspf")
+                )
+        );
+    }
+
+    @Test
+    void methodAndFieldDeclaredInIncludeUsedInPage() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ include file="util.jspf" %>
+                        <%= format(new java.util.Date()) %> <%= counter %>
+                        """,
+                        """
+                        <%@ include file="util.jspf" %>
+                        ~~(VARIABLE_FROM_INCLUDE: 'format' is a Java method declared in <%! %> defined in included file util.jspf line 2: the page depends on a variable it does not define itself, so it can't be read or changed on its own; define the variable in the page, or pass it explicitly (e.g. as a request attribute set before the include))~~><%= format(new java.util.Date()) %> ~~(VARIABLE_FROM_INCLUDE: 'counter' is a Java field declared in <%! %> defined in included file util.jspf line 3: the page depends on a variable it does not define itself, so it can't be read or changed on its own; define the variable in the page, or pass it explicitly (e.g. as a request attribute set before the include))~~><%= counter %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp(
+                        """
+                        <%!
+                            String format(java.util.Date d) { return d.toString(); }
+                            private int counter = 0;
+                        %>
+                        """,
+                        spec -> spec.path("util.jspf")
+                )
+        );
+    }
+
+    @Test
+    void variablesNotVisibleOutsideTheIncludeOrRedefinedByThePageAreFine() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ include file="init.jspf" %>
+                        <c:set var="total" value="0"/>
+                        ${total} <%= order.item %> <%= "item" %>
+                        ${row} ${param.item} ${fn:length(list)}
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp(
+                        """
+                        <% if (x) { String item = "a"; } %>
+                        <% for (String tmp : list) { } %>
+                        <c:set var="total" value="1"/>
+                        <c:forEach var="row" items="${rows}">${row}</c:forEach>
+                        """,
+                        spec -> spec.path("init.jspf")
+                )
+        );
+    }
 }
