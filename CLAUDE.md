@@ -191,6 +191,13 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   "anything from this package" is used without a real type checker), and usage is a whole-word
   match on the simple name, not a resolved type reference — same "can only false-positive toward
   keeping, never toward deleting" safety property as `RemoveUnusedTaglibs`.
+- **`JspInventory`** — an analysis-only `ScanningRecipe` for migration planning. It fills three data
+  tables: `table.JspConstructTotals` (written in `generate()`, after every page has been scanned),
+  `table.JspConstructUsage` and `table.JspPageInventory` (both written by the scanner, one page at a
+  time). The counting is in `JspInventoryCollector`. Tags and EL functions are keyed by library
+  `uri` and local name, not by prefix, because prefixes vary between pages. Included files are read
+  only for their taglib prefixes and never counted as part of the including page, so each file's
+  content counts once.
 - **`FindJspProblems`** — an analysis-only `ScanningRecipe`: it changes nothing, and reports each
   problem as a `SearchResult` marker plus a row in the `table.JspProblems` data table (with page,
   file, line, rule). The rules are listed in its Javadoc: tag balance (`MISSING_END_TAG`,
