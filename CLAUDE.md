@@ -203,6 +203,28 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   "anything from this package" is used without a real type checker), and usage is a whole-word
   match on the simple name, not a resolved type reference — same "can only false-positive toward
   keeping, never toward deleting" safety property as `RemoveUnusedTaglibs`.
+- **`MaintainFixtures`** — maintains the *tester's* JSON fixtures as `PlainText` source files. It
+  creates them in `generate()`, updates them with `withText`, and deletes them by returning `null`.
+  It is how `ModelAttributeCollector`'s per-page inputs reach the tester.
+  - **Scan:** the scanner records every parsed page (page path = sourcePath relative to
+    `webappDirectory`), every fixture JSON's `"page"`, and any `struts-config.xml`. Skeletons are
+    computed lazily after the scan, so struts-config form beans resolve regardless of scan order.
+  - **`FixtureSkeletons.skeleton`:** builds a `Shape` tree from each input's type and property
+    paths (`a.b`, `x[]`, `[].y`), then JSON. It adds `@class` only for fully qualified non-JDK
+    types, uses typed placeholders, and puts the inexpressible in `"_todo"`.
+  - **`addMissing` adds `null`, not placeholders, on purpose.** An existing fixture may omit an input
+    deliberately, and a null input equals an absent one in the tester: `Fixtures.read` skips null
+    parameters, and `ThymeleafTester` skips null attributes because MockMvc rejects them. So updates
+    never change rendering or invalidate snapshots. This was verified end to end on
+    `tester-example`.
+  - **Generated fixtures are registered** in the accumulator by `generate()`. Otherwise the edit
+    phase, which also visits generated files, would report them `SKIPPED`.
+  - **`includes`/`excludes`** are `PathGlob` patterns on the page path. They scope creation, update
+    *and* deletion. `deleteOrphans` only deletes in-scope fixtures whose page wasn't parsed, along
+    with their `.expected.html` if that was parsed too.
+  - **JSON output** matches the tester's `Fixtures` printer: `"k": v`, two-space indents,
+    `[]`/`{}`. That printer is duplicated in `FixtureSkeletons`, because `receipes` doesn't depend
+    on `tester`.
 - **`FindModelAttributes`** — an analysis-only `ScanningRecipe<StrutsConfig>` that lists each page's
   inputs in `table.JspModelAttributes`: model attributes, request parameters and Tiles attributes,
   with type and property paths where known. Its scanner collects the form beans and action

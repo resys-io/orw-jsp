@@ -48,12 +48,16 @@ for (JspProblems.Row problem : problems) {
     System.out.printf("%s:%d %s %s%n", problem.getFile(), problem.getLine(), problem.getRule(), problem.getMessage());
 }
 
-// Cleanup: write back the files a recipe changed.
+// Cleanup: write back the files a recipe changed (or, as MaintainFixtures can, created or deleted).
 RecipeRun cleanup = new RemoveUnusedTaglibs().run(new InMemoryLargeSourceSet(sources), ctx);
 for (Result result : cleanup.getChangeset().getAllResults()) {
     SourceFile after = result.getAfter();
     if (after != null) {
-        Files.writeString(project.resolve(after.getSourcePath()), after.printAll(), after.getCharset());
+        Path file = project.resolve(after.getSourcePath());
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, after.printAll(), after.getCharset());
+    } else {
+        Files.delete(project.resolve(result.getBefore().getSourcePath()));
     }
 }
 ```
@@ -544,6 +548,75 @@ tables:
 - **`JspMigrationEffort`**, one row per page: `javaConstructs`, `migratable`, `manual`, and
   `manualJavaLines`, as a rough estimate of the manual effort.
 
+### `MaintainFixtures`
+
+**This recipe creates, changes and deletes files.** It maintains the [tester's](#testing-pages-the-tester)
+fixtures for the JSP pages, using the inputs `FindModelAttributes` finds each page reads:
+
+- **Creating.** A page with no fixture (no fixture whose `"page"` is that page) gets a skeleton.
+  Parameters go under `parameters`, request and any-scope attributes under `request`, and session
+  and application attributes under their own sections. Each value is shaped by its type and the
+  properties the page reads, with placeholders to fill in: `""`, `0`, `false`, or a date.
+  Anything a fixture can't express goes in a `"_todo"` list, which the tester ignores: inputs read
+  by a non-literal key, Tiles attributes, Struts `DynaActionForm` form beans (Struts creates
+  those), and types that aren't fully qualified.
+
+  ```json
+  {
+    "page": "/WEB-INF/views/products.jsp",
+    "parameters": { "page": "" },
+    "request": {
+      "buyer": { "@class": "com.acme.shop.Customer", "name": "" },
+      "products": [ { "name": "", "price": "" } ],
+      "pageCount": ""
+    }
+  }
+  ```
+
+  (The recipe writes one entry per line; shown compact here.)
+- **Updating.** Each existing fixture for a page gets the inputs it lacks: sections, attributes,
+  and nested properties, also in each element of a list. **They're added as `null`**, never as
+  placeholders. A fixture may lack an input on purpose (for example, no signed-in user), and a
+  `null` input is the same as an absent one, so the fixture renders exactly as before and its
+  snapshot stays valid. The key is simply there to fill in. Existing values are never changed or
+  removed, and a complete fixture isn't rewritten.
+- **Deleting** (only with `deleteOrphans`). A fixture whose page no longer exists is deleted,
+  together with its `.expected.html`.
+
+New fixtures are named after the page path without `/WEB-INF/views/` (or `/WEB-INF/jsp/`,
+`/WEB-INF/pages/`, `/WEB-INF/`) and the extension: `/WEB-INF/views/orders/list.jsp` becomes
+`orders/list.json`, numbered `-2`, `-3`… if that name is taken.
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `fixturesDirectory` | `String` | `src/test/fixtures` | Where the fixtures are, relative to the project root |
+| `webappDirectory` | `String` | `src/main/webapp` | The web application root; page paths are relative to it |
+| `includes` | `List<String>` | `**/*.jsp` | Pages to maintain, as patterns on the page path, e.g. `/WEB-INF/views/**`. `*` matches within a path segment, `**` across segments, `?` one character. The default leaves out `.jspf` fragments. |
+| `excludes` | `List<String>` | none | Pages to leave out. They get no fixtures created or updated, and theirs are never deleted. |
+| `deleteOrphans` | `Boolean` | `false` | Delete fixtures (and their expected output) whose page no longer exists |
+
+**Parsing.** Parse every page (`.jsp`/`.jspf` under the web application) with `JspParser`: a page
+that isn't parsed counts as gone. Parse the fixture files (`.json` and `.expected.html`) with
+OpenRewrite's `PlainTextParser`, so the recipe can create, change and delete them. A
+`struts-config.xml` parsed with `XmlParser` adds form beans' types.
+
+```java
+List<SourceFile> sources = new ArrayList<>(JspParser.builder().build().parse(jsps, project, ctx).toList());
+sources.addAll(PlainTextParser.builder().build().parse(fixtureFiles, project, ctx).toList());
+RecipeRun run = new MaintainFixtures(null, null, List.of("/WEB-INF/views/**"), null, true)
+        .run(new InMemoryLargeSourceSet(sources), ctx);
+```
+
+Write the results back as in [Running the recipes](#running-the-recipes), including created and
+deleted files. Every action is listed in the `JspFixtureChanges` data table (`fixture`, `page`,
+`action`, `details`). The actions are `CREATED`, `UPDATED` (with the paths added), `DELETED`, and
+`SKIPPED` (a `.json` that isn't fixture JSON with a `"page"`).
+
+After creating skeletons, fill in their values, then run the tester with `-Dorw.tester.update=true`
+to create their expected output, which also fills in their `mocks`.
+
 ### `FindJspProblems`
 
 An analysis recipe that finds structural and readability problems. **It changes nothing.** It
@@ -771,7 +844,9 @@ with a 500 naming the tag.
 ### Fixtures
 
 A fixture is a JSON file describing a page's inputs. Its expected output sits next to it:
-`orders.json` goes with `orders.expected.html`.
+`orders.json` goes with `orders.expected.html`. You don't have to write fixtures from scratch: the
+[`MaintainFixtures`](#maintainfixtures) recipe creates a skeleton for each page from the inputs
+the page reads, and keeps fixtures in step as pages change.
 
 ```json
 {
