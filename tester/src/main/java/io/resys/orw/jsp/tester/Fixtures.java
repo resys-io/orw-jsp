@@ -235,9 +235,14 @@ public final class Fixtures {
             request.locale(Locale.forLanguageTag(text(root, "locale")));
         }
         fields(root, "parameters").forEach((name, value) -> {
+            // null: not sent (as a null attribute is not set), e.g. an input MaintainFixtures added.
             if (value.isArray()) {
-                value.forEach(v -> request.param(name, v.asText()));
-            } else {
+                value.forEach(v -> {
+                    if (!v.isNull()) {
+                        request.param(name, v.asText());
+                    }
+                });
+            } else if (!value.isNull()) {
                 request.param(name, value.asText());
             }
         });

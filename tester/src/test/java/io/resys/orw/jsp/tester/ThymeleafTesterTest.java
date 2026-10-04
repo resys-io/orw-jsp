@@ -105,4 +105,15 @@ class ThymeleafTesterTest {
         assertThat(rendered.status()).isEqualTo(500);
         assertThat(rendered.body()).contains("missing");
     }
+
+    @Test
+    void nullAttributesAreAbsentOnes() {
+        // As MaintainFixtures adds inputs to existing fixtures; MockMvc itself would reject them.
+        java.util.Map<String, Object> nullUser = new java.util.HashMap<>();
+        nullUser.put("user", null);
+        RenderRequest request = RenderRequest.page("/web.jsp").requestAttribute("missing", null)
+                .applicationAttribute("version", null);
+        nullUser.forEach(request::sessionAttribute);
+        assertThat(thymeleaf.renderOk(request)).doesNotContain("class=\"user\"");
+    }
 }

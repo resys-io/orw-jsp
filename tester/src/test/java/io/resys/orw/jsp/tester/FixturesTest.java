@@ -151,4 +151,18 @@ class FixturesTest {
         assertThatThrownBy(() -> Fixtures.read(fixture))
                 .hasMessageContaining("CUSTOM mocks are Java, so they can only be defined in code");
     }
+
+    @Test
+    void nullInputsAreTheSameAsAbsentOnes(@TempDir Path dir) throws IOException {
+        // As MaintainFixtures adds inputs to existing fixtures: nulls must not change the output.
+        Path without = Files.writeString(dir.resolve("without.json"), "{ \"page\": \"/hello.jsp\", \"request\": {\"name\": \"Ann\"} }");
+        Path withNulls = Files.writeString(dir.resolve("with.json"), """
+                { "page": "/hello.jsp", "parameters": {"q": null, "ids": [null]},
+                  "request": {"name": "Ann", "extra": null}, "session": {"user": null} }
+                """);
+        assertThat(tester.renderOk(Fixtures.read(withNulls).request()))
+                .isEqualTo(tester.renderOk(Fixtures.read(without).request()))
+                .contains("<p>null</p>");   // hello.jsp prints request.getParameter("q"): absent, so null
+        assertThat(Fixtures.read(withNulls).request().getParameters()).isEmpty();
+    }
 }

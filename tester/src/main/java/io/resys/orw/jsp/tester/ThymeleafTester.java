@@ -195,10 +195,23 @@ public final class ThymeleafTester implements Renderer {
                 .requestAttr(ThymeleafRenderController.TEMPLATE, templateFor(request))
                 .locale(request.getLocale());
         request.getParameters().forEach((name, values) -> http.param(name, values.toArray(String[]::new)));
-        request.getRequestAttributes().forEach(http::requestAttr);
-        request.getSessionAttributes().forEach(http::sessionAttr);
+        // A null attribute is an absent one (as in a servlet container); MockMvc rejects nulls.
+        request.getRequestAttributes().forEach((name, value) -> {
+            if (value != null) {
+                http.requestAttr(name, value);
+            }
+        });
+        request.getSessionAttributes().forEach((name, value) -> {
+            if (value != null) {
+                http.sessionAttr(name, value);
+            }
+        });
         http.with(servletRequest -> {
-            request.getApplicationAttributes().forEach(servletRequest.getServletContext()::setAttribute);
+            request.getApplicationAttributes().forEach((name, value) -> {
+                if (value != null) {
+                    servletRequest.getServletContext().setAttribute(name, value);
+                }
+            });
             return servletRequest;
         });
         try {
