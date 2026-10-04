@@ -346,6 +346,71 @@ included files, which are compiled into the same servlet.
 - A wildcard import gives a list of candidates instead.
 - Calls inside an included file are reported for that file, not for each page that includes it.
 
+### `MigrateJavaVariablesToPageAttributes`
+
+**This recipe changes pages.** It copies Java variables declared in scriptlets into page-scoped
+attributes, and turns `<%= %>` expressions that only output them into EL. The values then become
+usable from EL and JSTL, which is the first step toward replacing scriptlets:
+
+```jsp
+<%-- before --%>
+<% String name = user.getName(); %>
+<p><%= name %></p>
+<% for (Order o : orders) { %>
+  <td><%= o.getTotal() %></td>
+<% } %>
+
+<%-- after --%>
+<% String name = user.getName(); pageContext.setAttribute("name", name); %>
+<p>${name}</p>
+<% for (Order o : orders) { pageContext.setAttribute("o", o); %>
+  <td>${o.total}</td>
+<% } %>
+```
+
+- **Java code keeps working:** the Java variable stays, so other Java code is untouched.
+- **Where `setAttribute` goes:** after each declaration with an initializer, at the start of each
+  braced loop body declaring the variable, and after every assignment statement (`x = …;`,
+  `x += …;`, `x++;`), so the page attribute never goes stale.
+- **Which outputs become EL:** an output is converted if it is the variable alone, or the variable
+  followed by `get…()` getters: `<%= o.getCustomer().getName() %>` becomes `${o.customer.name}`.
+- **Running it again changes nothing more:** it recognizes the `setAttribute`s it already added.
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `convertTagAttributes` | `Boolean` | `false` | Also convert a custom tag attribute that is exactly `<%= x %>` to `${x}`. Only safe if the tag evaluates EL in that attribute: a JSP 2.0+ container with `rtexprvalue` attributes, or EL-aware tags. |
+| `mirrorAll` | `Boolean` | `false` | Also copy variables that no `<%= %>` outputs into page attributes, e.g. to use them from JSTL conditions later. |
+
+#### Left unchanged
+
+A variable is left unchanged in these cases. Each one is reported with its reason in the
+`JspVariableMigrations` data table (`sourcePath`, `variable`, `status` = `MIGRATED`/`SKIPPED`,
+`reason`, `declarations`, `convertedUses`):
+
+- **Written where no statement can follow:** inside an expression
+  (`while ((line = r.readLine()) != null)`), a braceless `if`/`else`/loop body, or a `case`
+  label. The same applies to a loop without braces that declares it.
+- **The name is already in use:** the page uses it in EL or as a tag's `name`/`var`/`id`, and a
+  page attribute with that name would hide the existing value.
+- **The name means something else in EL:** an EL reserved word or implicit object (`param`,
+  `header`, `empty`, …).
+- **A `<%! %>` field:** it is shared by all requests.
+- **Never output:** no `<%= %>` outputs it, unless `mirrorAll` is set.
+
+`is…()` getters stay Java, because EL only recognizes them on primitive `boolean` properties. A
+variable declared only in an included file is migrated in that file, when the recipe runs on it.
+
+#### EL must be enabled
+
+Nothing is changed on a page with `<%@ page isELIgnored="true" %>`. Struts 1 applications often
+have a Servlet 2.3 `web.xml` (version below 2.4, or DTD-based), in which **EL is off by default**.
+Parse `web.xml` together with the pages (with `XmlParser`, as for `struts-config.xml`), and the
+recipe changes nothing and reports why. Without a parsed `web.xml` it assumes EL is enabled.
+
+**One output difference:** `<%= x %>` prints `null` for a null value; `${x}` prints nothing.
+
 ### `FindJspProblems`
 
 An analysis recipe that finds structural and readability problems. **It changes nothing.** It

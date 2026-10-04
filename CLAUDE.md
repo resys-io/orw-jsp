@@ -218,6 +218,24 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
     results. Visitor-based recipes therefore have to skip nodes under a `Jsp.IncludedFile`
     (`getCursor().firstEnclosing(Jsp.IncludedFile.class)`), or they would report an included
     file's content once per page that includes it.
+- **`MigrateJavaVariablesToPageAttributes`** — the first recipe here that rewrites code. It inserts
+  `pageContext.setAttribute("x", x);` after every write of a scriptlet variable and turns
+  `<%= x %>`/`<%= x.getA() %>` into `${x}`/`${x.a}`.
+  - **Where the logic is:** `JavaVariableMigrator` does `analyze` (which decides `MIGRATED`/`SKIPPED`
+    per name), then `migrate`. `JavaStatements` is a statement-level scanner. It treats `;`, `{`
+    and `}` outside parentheses as statement boundaries and recognizes declarations,
+    loop variables (with the insertion point just after the body's `{`) and assignment statements.
+  - **The safety rule:** every write found by `JavaStatements.allWrites` must be one of the
+    recognized sites, or lie inside the loop header that declares the variable. Otherwise the name
+    is skipped, because there would be a write the mirror can't follow.
+  - **Variables are tracked by name**, not by Java scope. A name is migrated everywhere on the page
+    or nowhere.
+  - **Idempotence:** an existing `setAttribute("x", x)` right after a write is not inserted again,
+    and an already-mirrored name doesn't count as an EL name conflict. RewriteTest's second cycle
+    depends on this.
+  - **EL availability:** its scanner reads any parsed `web.xml` (root `web-app`). A missing
+    `version` (DTD-based) or one below 2.4 means EL is off by default, so nothing changes.
+    `isELIgnored="true"` pages are skipped too.
 - **`JspInventory`** — an analysis-only `ScanningRecipe` for migration planning. It fills three data
   tables: `table.JspConstructTotals` (written in `generate()`, after every page has been scanned),
   `table.JspConstructUsage` and `table.JspPageInventory` (both written by the scanner, one page at a
