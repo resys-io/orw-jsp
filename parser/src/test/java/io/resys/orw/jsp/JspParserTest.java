@@ -2,7 +2,15 @@ package io.resys.orw.jsp;
 
 import io.resys.orw.jsp.tree.Jsp;
 import org.junit.jupiter.api.Test;
+import org.openrewrite.InMemoryExecutionContext;
+import org.openrewrite.ParseExceptionResult;
+import org.openrewrite.Parser;
+import org.openrewrite.SourceFile;
 import org.openrewrite.test.RewriteTest;
+import org.openrewrite.tree.ParseError;
+
+import java.nio.file.Path;
+import java.util.List;
 
 import static io.resys.orw.jsp.Assertions.jsp;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +89,21 @@ class JspParserTest implements RewriteTest {
                         """
                 )
         );
+    }
+    @Test
+    void invalidTagsAndStrangeScriplet() {
+        List<SourceFile> parsed = JspParser.builder().build()
+                .parseInputs(List.of(Parser.Input.fromString(Path.of("pages/strange.jsp"),
+                        "<p>\n  <option:not <% %>></option>\n</p>\n")), null, new InMemoryExecutionContext())
+                .toList();
+
+        assertThat(parsed).singleElement().isInstanceOf(ParseError.class);
+        assertThat(parsed.get(0).getMarkers().findFirst(ParseExceptionResult.class))
+                .get()
+                .extracting(ParseExceptionResult::getMessage)
+                .asString()
+                .contains("pages/strange.jsp:2:15: Malformed tag <option:not> (started at line 2, column 3):" +
+                          " expected '>' or '/>' but found '<% %>></op'");
     }
 
     @Test

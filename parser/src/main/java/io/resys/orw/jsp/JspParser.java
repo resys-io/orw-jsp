@@ -118,7 +118,7 @@ public class JspParser implements Parser {
     private Jsp.Document parseFromInput(Path sourcePath, Path absolutePath, Includes includes,
                                         EncodingDetectingInputStream source) {
         String text = source.readFully();
-        Scanner scanner = new Scanner(text, new FileContext(includes, absolutePath, Set.of(absolutePath)));
+        Scanner scanner = new Scanner(text, new FileContext(includes, sourcePath, absolutePath, Set.of(absolutePath)));
         List<Jsp.Content> nodes = parseNodes(scanner, List.of());
         return new Jsp.Document(
                 randomId(),
@@ -258,10 +258,11 @@ public class JspParser implements Parser {
     }
 
     private static Jsp.Comment parseComment(Scanner sc) {
+        int start = sc.pos;
         sc.advance(4); // "<%--"
         int close = sc.indexOf("--%>");
         if (close < 0) {
-            throw new JspParsingException("Unterminated JSP comment: missing --%>");
+            throw sc.error(start, "Unterminated JSP comment: missing --%>");
         }
         String body = sc.substringToAbsolute(close);
         sc.advance(4); // "--%>"
@@ -269,13 +270,14 @@ public class JspParser implements Parser {
     }
 
     private static Jsp.Directive parseDirective(Scanner sc) {
+        int start = sc.pos;
         sc.advance(3); // "<%@"
         String beforeName = sc.scanWhitespace();
         String name = sc.scanName();
         List<Jsp.Attribute> attributes = parseAttributes(sc);
         String beforeEnd = sc.scanWhitespace();
         if (!sc.startsWith("%>")) {
-            throw new JspParsingException("Malformed directive <%@ " + name + " ...>: expected %>");
+            throw sc.error(sc.pos, "Malformed directive <%@ " + name + " %> (started at " + sc.location(start) + "): expected %> but found " + sc.found());
         }
         sc.advance(2);
         Markers markers = Markers.EMPTY;
@@ -308,20 +310,23 @@ public class JspParser implements Parser {
     }
 
     private static Jsp.Declaration parseDeclaration(Scanner sc) {
+        int start = sc.pos;
         sc.advance(3); // "<%!"
-        String code = scanCode(sc, "declaration");
+        String code = scanCode(sc, "declaration", start);
         return new Jsp.Declaration(randomId(), "", Markers.EMPTY, code);
     }
 
     private static Jsp.Scriptlet parseScriptlet(Scanner sc) {
+        int start = sc.pos;
         sc.advance(2); // "<%"
-        String code = scanCode(sc, "scriptlet");
+        String code = scanCode(sc, "scriptlet", start);
         return new Jsp.Scriptlet(randomId(), "", Markers.EMPTY, code);
     }
 
     private static Jsp.ExpressionScriptlet parseExpressionScriptlet(Scanner sc) {
+        int start = sc.pos;
         sc.advance(3); // "<%="
-        String code = scanCode(sc, "expression");
+        String code = scanCode(sc, "expression", start);
         return new Jsp.ExpressionScriptlet(randomId(), "", Markers.EMPTY, code);
     }
 
@@ -332,10 +337,10 @@ public class JspParser implements Parser {
      * means those two characters never appear consecutively there, so a plain search for the
      * (unescaped) two-character token {@code "%>"} already skips right over it.
      */
-    private static String scanCode(Scanner sc, String constructName) {
+    private static String scanCode(Scanner sc, String constructName, int start) {
         int close = sc.indexOf("%>");
         if (close < 0) {
-            throw new JspParsingException("Unterminated " + constructName + ": missing %>");
+            throw sc.error(start, "Unterminated " + constructName + ": missing %>");
         }
         String code = sc.substringToAbsolute(close);
         sc.advance(2);
@@ -350,6 +355,7 @@ public class JspParser implements Parser {
     private static Jsp.ExpressionLanguage parseExpressionLanguage(Scanner sc) {
         Jsp.ExpressionLanguage.Type type = sc.peek() == '#' ?
                 Jsp.ExpressionLanguage.Type.DEFERRED : Jsp.ExpressionLanguage.Type.IMMEDIATE;
+        int start = sc.pos;
         sc.advance(2); // marker + '{'
 
         StringBuilder sb = new StringBuilder();
@@ -357,7 +363,7 @@ public class JspParser implements Parser {
         Character inString = null;
         while (true) {
             if (sc.isEof()) {
-                throw new JspParsingException("Unterminated EL expression: missing '}'");
+                throw sc.error(start, "Unterminated EL expression: missing '}'");
             }
             char c = sc.peek();
             if (inString != null) {
@@ -395,6 +401,7 @@ public class JspParser implements Parser {
     }
 
     private static Jsp.Tag parseTag(Scanner sc, List<String> openTags) {
+        int start = sc.pos;
         sc.advance(1); // '<'
         String name = sc.scanName();
         List<Jsp.Attribute> attributes = parseAttributes(sc);
@@ -408,7 +415,7 @@ public class JspParser implements Parser {
             selfClosing = false;
             sc.advance(1);
         } else {
-            throw new JspParsingException("Malformed tag <" + name + " ...>: expected '>' or '/>'");
+            throw sc.error(sc.pos, "Malformed tag <" + name + "> (started at " + sc.location(start) + "): expected '>' or '/>' but found " + sc.found());
         }
 
         if (selfClosing) {
@@ -430,6 +437,7 @@ public class JspParser implements Parser {
      * the page.
      */
     private static Jsp.Tag.Closing parseClosing(Scanner sc) {
+        int tagStart = sc.pos;
         sc.advance(2); // "</"
         String beforeName = sc.scanWhitespace();
         String name = sc.scanName();
@@ -447,7 +455,7 @@ public class JspParser implements Parser {
             sc.advance(1);
         }
         if (sc.isEof()) {
-            throw new JspParsingException("Malformed closing tag </" + name + " ...>: expected '>'");
+            throw sc.error(tagStart, "Unterminated closing tag </" + name + ">: missing '>'");
         }
         String beforeDelim = sc.s.substring(start, sc.pos);
         sc.advance(1);
@@ -464,21 +472,23 @@ public class JspParser implements Parser {
                 break;
             }
 
+            int nameStart = sc.pos;
             String name = sc.scanName();
             String beforeEquals = sc.scanWhitespace();
             if (!sc.startsWith("=")) {
-                throw new JspParsingException("Attribute '" + name + "' must have a quoted value");
+                throw sc.error(sc.pos, "Attribute '" + name + "' (at " + sc.location(nameStart) + ") must have a quoted value: expected '=' but found " + sc.found());
             }
             sc.advance(1);
             String valuePrefix = sc.scanWhitespace();
             if (sc.isEof() || (sc.peek() != '"' && sc.peek() != '\'')) {
-                throw new JspParsingException("Attribute '" + name + "' value must be quoted");
+                throw sc.error(sc.pos, "Attribute '" + name + "' (at " + sc.location(nameStart) + ") value must be quoted: expected '\"' or '\'' but found " + sc.found());
             }
+            int valueStart = sc.pos;
             char quote = sc.peek();
             sc.advance(1);
             String value = sc.scanQuotedValue(quote);
             if (value == null) {
-                throw new JspParsingException("Unterminated attribute value for '" + name + "'");
+                throw sc.error(valueStart, "Unterminated value of attribute '" + name + "': missing closing " + quote);
             }
 
             Jsp.Attribute.Value attrValue = new Jsp.Attribute.Value(randomId(), valuePrefix, Markers.EMPTY, quote, value);
@@ -560,11 +570,12 @@ public class JspParser implements Parser {
     /**
      * The file being scanned, plus what's needed to resolve and parse its static includes.
      *
+     * @param sourcePath   the file's path as reported in parse errors, relative to the parse root when it is under it.
      * @param absolutePath the file's normalized absolute path.
      * @param chain        the absolute paths of every file on the current include chain, including
      *                     this one, used to refuse recursive includes.
      */
-    private record FileContext(Includes includes, Path absolutePath, Set<Path> chain) {
+    private record FileContext(Includes includes, Path sourcePath, Path absolutePath, Set<Path> chain) {
     }
 
     /**
@@ -611,14 +622,14 @@ public class JspParser implements Parser {
             }
             Set<Path> chain = new HashSet<>(including.chain());
             chain.add(target);
+            Path sourcePath = target.startsWith(base) ? base.relativize(target) : target;
             List<Jsp.Content> nodes;
             try {
-                nodes = parseNodes(new Scanner(text, new FileContext(this, target, chain)), List.of());
+                nodes = parseNodes(new Scanner(text, new FileContext(this, sourcePath, target, chain)), List.of());
             } catch (JspParsingException e) {
                 throw new UnresolvedIncludeException("Included file '" + file + "' could not be parsed: " +
                                                       e.getMessage());
             }
-            Path sourcePath = target.startsWith(base) ? base.relativize(target) : target;
             return new Jsp.IncludedFile(randomId(), Markers.EMPTY, sourcePath, unmodifiableList(nodes));
         }
 
@@ -719,6 +730,51 @@ public class JspParser implements Parser {
 
         void advance(int n) {
             pos += n;
+        }
+
+        /**
+         * @return an exception whose message is prefixed with this file's path and the 1-based
+         * line and column of the absolute index {@code at}.
+         */
+        JspParsingException error(int at, String message) {
+            return new JspParsingException(file.sourcePath(), lineOf(at), columnOf(at), message);
+        }
+
+        /**
+         * @return "line L, column C" for the absolute index {@code at}, for messages that mention
+         * a second position besides the one {@link #error} reports.
+         */
+        String location(int at) {
+            return "line " + lineOf(at) + ", column " + columnOf(at);
+        }
+
+        private int columnOf(int at) {
+            return at - s.lastIndexOf('\n', at - 1);
+        }
+
+        private int lineOf(int at) {
+            int line = 1;
+            for (int i = 0; i < at && i < s.length(); i++) {
+                if (s.charAt(i) == '\n') {
+                    line++;
+                }
+            }
+            return line;
+        }
+
+        /**
+         * @return a short, quoted excerpt of the input at the current position, or "end of input".
+         */
+        String found() {
+            if (isEof()) {
+                return "end of input";
+            }
+            String excerpt = s.substring(pos, Math.min(s.length(), pos + 10));
+            int newline = excerpt.indexOf('\n');
+            if (newline > 0) {
+                excerpt = excerpt.substring(0, newline);
+            }
+            return "'" + excerpt.replace("\r", "") + "'";
         }
 
         /**
