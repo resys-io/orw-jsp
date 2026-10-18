@@ -22,7 +22,16 @@ public enum MarkupMode {
      * declares no content type. Without one, JSP's default is {@code text/html}.
      */
     public static @Nullable MarkupMode declared(Jsp.Document document) {
-        return declared(document.getNodes());
+        String contentType = declaredContentType(document);
+        return contentType == null ? null : ofContentType(contentType);
+    }
+
+    /**
+     * @return the page's {@code <%@ page contentType="..." %>} value (also looking in statically
+     * included files), or {@code null} if it declares none.
+     */
+    public static @Nullable String declaredContentType(Jsp.Document document) {
+        return declaredContentType(document.getNodes());
     }
 
     /**
@@ -30,25 +39,32 @@ public enum MarkupMode {
      * {@code +xml} type (such as {@code application/xhtml+xml}) are XML, anything else HTML.
      */
     public static MarkupMode ofContentType(String contentType) {
-        int semicolon = contentType.indexOf(';');
-        String mimeType = (semicolon < 0 ? contentType : contentType.substring(0, semicolon))
-                .trim().toLowerCase(Locale.ROOT);
+        String mimeType = mimeType(contentType);
         return "text/xml".equals(mimeType) || "application/xml".equals(mimeType) || mimeType.endsWith("+xml") ?
                 XML : HTML;
     }
 
-    private static @Nullable MarkupMode declared(List<? extends Jsp.Content> nodes) {
+    /**
+     * @return a content type's MIME type, lower-cased and without parameters
+     * ({@code "text/html"} for {@code "text/html; charset=UTF-8"}).
+     */
+    public static String mimeType(String contentType) {
+        int semicolon = contentType.indexOf(';');
+        return (semicolon < 0 ? contentType : contentType.substring(0, semicolon)).trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static @Nullable String declaredContentType(List<? extends Jsp.Content> nodes) {
         for (Jsp.Content node : nodes) {
             if (node instanceof Jsp.Directive directive) {
                 if ("page".equals(directive.getName())) {
                     for (Jsp.Attribute attribute : directive.getAttributes()) {
                         if ("contentType".equals(attribute.getName())) {
-                            return ofContentType(attribute.getValue().getValue());
+                            return attribute.getValue().getValue();
                         }
                     }
                 }
                 if (directive.getIncludedFile() != null) {
-                    MarkupMode included = declared(directive.getIncludedFile().getNodes());
+                    String included = declaredContentType(directive.getIncludedFile().getNodes());
                     if (included != null) {
                         return included;
                     }

@@ -95,14 +95,14 @@ final class JspPageAnalyzer {
     /**
      * Elements that never have an end tag (or content), in HTML only.
      */
-    private static final Set<String> VOID = Set.of(
+    static final Set<String> VOID = Set.of(
             "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
             "source", "track", "wbr", "basefont", "frame", "isindex", "keygen", "command");
 
     /**
      * Elements that start foreign (SVG/MathML) content, where self-closing tags are allowed in HTML.
      */
-    private static final Set<String> FOREIGN = Set.of("svg", "math");
+    static final Set<String> FOREIGN = Set.of("svg", "math");
 
     /**
      * Elements whose content is raw text, not markup, up to their own end tag, in HTML only.

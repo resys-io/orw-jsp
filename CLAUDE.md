@@ -315,6 +315,19 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   - **Shared settings:** it shares `MigrateJavaVariablesToPageAttributes.WebXml` (and its scanner)
     for the EL-disabled check. `jstlVersion` 1.0 is the exception, because JSTL 1.0 evaluates EL
     itself; outputs are then written as `<c:out escapeXml="false">`.
+- **`MigrateXhtmlToHtml`** — a `ScanningRecipe` that turns `application/xhtml+xml` pages into
+  `text/html`. It rewrites the content type (`page` directive, `<meta http-equiv>`,
+  `setContentType` in scriptlets) and replaces a DOCTYPE with a `PUBLIC`/`SYSTEM` identifier (but
+  no internal subset) with `<!DOCTYPE html>`. It removes `<?xml ?>` (and its line break) unless
+  `removeXmlDeclaration` is `false`. It drops the `/` and end tags of void elements
+  (`JspPageAnalyzer.VOID`) and adds end tags to other self-closed elements.
+  - **Tokenizer:** its own small XML tokenizer runs over the `Jsp.Text` nodes, with state carried
+    across JSP nodes like `JspPageAnalyzer`'s. Edits are recorded per text node id, then applied.
+    An end tag is removed only when it lies within one text node. A self-closing `/` counts only
+    when it is in the same node as the `>`.
+  - **Left alone:** `<svg>`/`<math>` content, comments, CDATA, and `<script>`/`<style>` content.
+  - **Fragments:** the scanner records the kind of each include target's includers. A file with
+    no `contentType` is migrated if an XHTML page includes it and no other-XML page does.
 - **`JspInventory`** — an analysis-only `ScanningRecipe` for migration planning. It fills three data
   tables: `table.JspConstructTotals` (written in `generate()`, after every page has been scanned),
   `table.JspConstructUsage` and `table.JspPageInventory` (both written by the scanner, one page at a

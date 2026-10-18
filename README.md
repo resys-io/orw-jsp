@@ -176,6 +176,62 @@ code: scriptlets, declarations, and `<%= %>` expressions, including those in inc
   keep an unused import.
 - **Skips pages with an unresolved include,** and logs a `WARNING`, like `RemoveUnusedTaglibs`.
 
+### `MigrateXhtmlToHtml`
+
+Changes pages served as XHTML (`application/xhtml+xml`) to HTML (`text/html`).
+
+```jsp
+<%-- before --%>
+<%@ page contentType="application/xhtml+xml; charset=UTF-8" %>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<meta http-equiv="Content-Type" content="application/xhtml+xml; charset=UTF-8" />
+<script src="a.js"/>
+<div class="spacer"/>
+<p>one<br/>two<br></br>three</p>
+<img src="x.png" alt=""></img>
+
+<%-- after --%>
+<%@ page contentType="text/html; charset=UTF-8" %>
+<!DOCTYPE html>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<script src="a.js"></script>
+<div class="spacer"></div>
+<p>one<br>two<br>three</p>
+<img src="x.png" alt="">
+```
+
+- **Content type:** updated in the `page` directive, in `<meta http-equiv="Content-Type">`, and in
+  scriptlet calls to `response.setContentType(...)` and `setHeader("Content-Type", ...)`.
+  Parameters such as `charset` are kept.
+- **DOCTYPE:** one with a public or system identifier (XHTML 1.0/1.1, or HTML 4) becomes
+  `<!DOCTYPE html>`. One with an internal subset (`[...]`), which declares entities, is kept.
+- **XML declaration:** `<?xml version="1.0" ...?>`, which HTML parses as a comment, is removed
+  with the line break after it, unless `removeXmlDeclaration` is `false`. Other processing
+  instructions, such as `<?xml-stylesheet ...?>`, are kept.
+- **Void elements** (`<br>`, `<img>`, `<input>`, …) lose their self-closing `/` and any end tag.
+- **Other self-closed elements get an end tag,** because HTML ignores the `/` and leaves
+  `<div/>` open.
+- **Left unchanged:** JSP actions (`<c:out ... />`), self-closing tags inside `<svg>` and `<math>`
+  (valid in HTML), and the contents of comments, CDATA sections, `<script>` and `<style>`.
+  `xmlns` attributes are left too.
+- **Which pages:** a page whose `contentType` is `application/xhtml+xml`, including one declared
+  in an included file, or one without a `contentType` that sets that type from a scriptlet. A file
+  with no content type of its own (such as a `.jspf` fragment) is migrated when a migrated page
+  includes it and no other XML page (`text/xml`, …) does. Fragments no page includes are left alone.
+
+#### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `removeXmlDeclaration` | `Boolean` | `true` | Remove the `<?xml version="1.0" ...?>` declaration. |
+
+```java
+new MigrateXhtmlToHtml(null)   // defaults: remove the XML declaration
+new MigrateXhtmlToHtml(false)  // keep it
+```
+
 ### `JspInventory`
 
 An analysis recipe for planning a migration. It lists which JSP constructs the pages use, how
