@@ -82,10 +82,15 @@ same pattern (`Properties.@Nullable Content`), and `RemoveUnusedImports#rewriteP
   `maven.deploy.skip`). Javadoc runs with `doclint` off, because links to Lombok-generated
   getters can't resolve. Check it locally with `mvn -P release -Dgpg.skip -DskipTests verify`.
 - **Lifecycle plugins are pinned** (`resources`, `compiler`, `jar`, `install`) in the root
-  `pluginManagement`. Unpinned, they follow the runner's Maven. v1.1.0 failed to publish when that
-  brought `maven-install-plugin` 3.2.0. `central-publishing-maven-plugin` 0.11.0 then left the
-  per-artifact `maven-metadata` file in the bundle ("Bundle has content that does NOT have a .pom
-  file"). Check its `Pre Bundling - deleted ...` log lines before upgrading either plugin.
+  `pluginManagement`. Unpinned, they would follow the runner's Maven.
+- **`central-publishing-maven-plugin` must be 0.12.0 or later.** Maven 3.10 writes
+  `maven-metadata-local.xml` into the staging directory, and 0.11.x only deletes
+  `maven-metadata-central-staging.xml` (Maven 3.9's name). The leftover file made Central reject
+  v1.1.0 with "Bundle has content that does NOT have a .pom file". The bundle can be checked
+  without uploading: set a release version, add a settings file with a dummy `central` server, and
+  run `mvn -s <settings> -P release -Dgpg.skip -DskipTests deploy -pl '!tester-example'
+  -DcentralBaseUrl=http://localhost:9`. Then look for files outside the version directories in
+  `target/central-staging`.
 - **POM metadata** (url, scm, licenses, developers), which Central requires, is in the root POM.
   The `child.*.inherit.append.path="false"` attributes stop Maven from appending each module's
   artifactId to the inherited URLs. Each module has its own `<name>` and `<description>`.

@@ -107,11 +107,7 @@
     <pluginManagement>
       <plugins>
         <!--
-          Lifecycle plugins are pinned, not taken from whatever Maven the build machine has. The
-          release broke when the CI runner's Maven moved to maven-install-plugin 3.2.0:
-          central-publishing-maven-plugin 0.11.0 stages through it and then no longer removed the
-          per-artifact maven-metadata file, and Central rejected the bundle ("Bundle has content
-          that does NOT have a .pom file").
+          Lifecycle plugins are pinned, so builds don't change with the Maven the build machine has.
         -->
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
@@ -231,7 +227,7 @@
           <plugin>
             <groupId>org.sonatype.central</groupId>
             <artifactId>central-publishing-maven-plugin</artifactId>
-            <version>0.11.0</version>
+            <version>0.12.0</version>
             <extensions>true</extensions>
             <configuration>
               <publishingServerId>central</publishingServerId>
