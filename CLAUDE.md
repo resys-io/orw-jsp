@@ -353,7 +353,12 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   tag split by an include. The `allowSplitBetweenIncludedFiles` option silences the header/footer
   case only: an element whose two tags are in two *included* files. One tag in the page and the
   other in an include is always reported. Problems inside included files are anchored to the
-  page's include directive. The scan phase collects every include target. Those files and all
+  page's include directive. The tokenizer has two modes (`MarkupMode`): HTML (case-insensitive
+  names, void/optional-end-tag/raw-text elements) and XML (case-sensitive, everything closed or
+  self-closed, CDATA sections). The `markupMode` option is `auto` by default, which uses the page's
+  `contentType` (`MarkupMode.declared`, which also looks in included files). A fragment without one is
+  XML only if all its includers are, which is why the scanner records the includers' modes per include
+  target. The scan phase collects every include target. Those files and all
   `.jspf` files are *fragments*, so "left open at end of file" and "end tag with no start tag" are
   not reported for them. A page with an unresolved include gets
   `UNRESOLVED_INCLUDE` and no balance checks. To place a marker at an exact offset inside a

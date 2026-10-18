@@ -39,6 +39,12 @@ import static org.openrewrite.Tree.randomId;
  * JSP action (e.g. {@code <c:if>}) and each Java block ({@code { ... }}) opened by a scriptlet. An
  * element opened inside a block must be closed inside it, otherwise the page's markup structure
  * depends on which branch runs ({@link Rule#ELEMENT_CROSSES_BLOCK}).
+ * <p>
+ * The tokenizer follows the page's {@link MarkupMode}. In {@link MarkupMode#HTML}, element names
+ * are case-insensitive, void elements and elements with optional end tags may stay unclosed, and
+ * {@code <script>}/{@code <style>}-like elements hold raw text. In {@link MarkupMode#XML}, names
+ * are case-sensitive, every element must be closed or self-closed, and only CDATA sections hold
+ * raw text.
  */
 final class JspPageAnalyzer {
 
@@ -76,21 +82,21 @@ final class JspPageAnalyzer {
     }
 
     /**
-     * Elements whose end tag is mandatory in HTML is the default; these may omit it.
+     * Elements whose end tag is mandatory in HTML is the default; these may omit it (in HTML only).
      */
     private static final Set<String> OPTIONAL_END_TAG = Set.of(
             "html", "head", "body", "li", "dt", "dd", "p", "rt", "rp", "optgroup", "option",
             "colgroup", "caption", "thead", "tbody", "tfoot", "tr", "td", "th");
 
     /**
-     * Elements that never have an end tag (or content).
+     * Elements that never have an end tag (or content), in HTML only.
      */
     private static final Set<String> VOID = Set.of(
             "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
             "source", "track", "wbr", "basefont", "frame", "isindex", "keygen", "command");
 
     /**
-     * Elements whose content is raw text, not markup, up to their own end tag.
+     * Elements whose content is raw text, not markup, up to their own end tag, in HTML only.
      */
     private static final Set<String> RAW_TEXT = Set.of("script", "style", "textarea", "title", "xmp");
 
@@ -101,7 +107,7 @@ final class JspPageAnalyzer {
             "\\bout\\s*\\.\\s*(?:print|println|write|append)\\s*\\(\\s*\"(?:[^\"\\\\]|\\\\.)*<\\s*/?\\s*[A-Za-z]");
 
     private enum State {
-        DATA, IN_TAG, ATTR_VALUE, COMMENT, BOGUS_COMMENT, RAW_TEXT
+        DATA, IN_TAG, ATTR_VALUE, COMMENT, BOGUS_COMMENT, RAW_TEXT, CDATA
     }
 
     /**
@@ -132,6 +138,7 @@ final class JspPageAnalyzer {
 
     private final Path pageFile;
     private final boolean fragment;
+    private final boolean xml;
     private final int maxScriptletLines;
     private final boolean allowSplitBetweenIncludedFiles;
     private final boolean balanceChecked;
@@ -181,13 +188,15 @@ final class JspPageAnalyzer {
     /**
      * @param fragment whether the page is a fragment (a {@code .jspf}, or a file other pages
      *                 include), whose markup may legitimately be closed or opened by its includers.
+     * @param markup   whether the page's template text is HTML or XML.
      */
-    JspPageAnalyzer(Jsp.Document document, boolean fragment, int maxScriptletLines,
+    JspPageAnalyzer(Jsp.Document document, boolean fragment, MarkupMode markup, int maxScriptletLines,
                     boolean allowSplitBetweenIncludedFiles) {
         this.allowSplitBetweenIncludedFiles = allowSplitBetweenIncludedFiles;
         this.pageFile = document.getSourcePath();
         this.file = pageFile;
         this.fragment = fragment;
+        this.xml = markup == MarkupMode.XML;
         this.maxScriptletLines = maxScriptletLines;
         this.balanceChecked = UnresolvedIncludes.find(document).isEmpty();
     }
@@ -199,7 +208,7 @@ final class JspPageAnalyzer {
                 Element element = (Element) entry;
                 if (!element.reported && requiresEndTag(element.name)) {
                     report(Rule.MISSING_END_TAG, element.location, null, true,
-                            "<" + element.name + "> has no end tag");
+                            "<" + element.name + "> has no end tag" + selfClosingHint(element.name));
                 }
             }
         }
@@ -754,6 +763,12 @@ final class JspPageAnalyzer {
                         state = State.DATA;
                     }
                     break;
+                case CDATA:
+                    if (s.startsWith("]]>", i)) {
+                        state = State.DATA;
+                        i += 2;
+                    }
+                    break;
                 case RAW_TEXT:
                     if (c == '<' && s.startsWith("/", i + 1) &&
                         s.regionMatches(true, i + 2, rawTextElement, 0, rawTextElement.length()) &&
@@ -791,6 +806,10 @@ final class JspPageAnalyzer {
             commentReported = false;
             return i + 3;
         }
+        if (xml && s.startsWith("<![CDATA[", i)) {
+            state = State.CDATA;
+            return i + 8;
+        }
         if (s.startsWith("<!", i) || s.startsWith("<?", i)) {
             state = State.BOGUS_COMMENT;
             return i + 1;
@@ -805,7 +824,7 @@ final class JspPageAnalyzer {
             nameEnd++;
         }
         String name = s.substring(nameStart, nameEnd);
-        beginTag(text, i, name.contains(":") ? name : name.toLowerCase(Locale.ROOT), end);
+        beginTag(text, i, xml || name.contains(":") ? name : name.toLowerCase(Locale.ROOT), end);
         return nameEnd - 1;
     }
 
@@ -862,15 +881,16 @@ final class JspPageAnalyzer {
         if (endTag) {
             if (endTagHasContent) {
                 report(Rule.END_TAG_WITH_ATTRIBUTES, location, null, false,
-                        "End tag </" + tagName + "> has attributes or other content, which browsers ignore");
+                        "End tag </" + tagName + "> has attributes or other content, " +
+                        (xml ? "which is not well-formed XML" : "which browsers ignore"));
             }
             if (!closesRawText) {
                 closeElement(tagName, location);
             }
-        } else if (RAW_TEXT.contains(tagName)) {
+        } else if (!xml && RAW_TEXT.contains(tagName)) {
             state = State.RAW_TEXT;
             rawTextElement = tagName;
-        } else if (!selfClosingSyntax && !VOID.contains(tagName)) {
+        } else if (!selfClosingSyntax && (xml || !VOID.contains(tagName))) {
             stack.add(new Element(tagName, location));
         }
     }
@@ -923,7 +943,7 @@ final class JspPageAnalyzer {
             if (!unclosed.reported && requiresEndTag(unclosed.name)) {
                 report(Rule.MISSING_END_TAG, unclosed.location, endTagLocation.file(), false,
                         "<" + unclosed.name + "> has no end tag (it is implicitly closed by </" + name +
-                        "> at " + where(endTagLocation) + ")");
+                        "> at " + where(endTagLocation) + ")" + selfClosingHint(unclosed.name));
             }
         }
         stack.remove(index);
@@ -954,7 +974,8 @@ final class JspPageAnalyzer {
                 if (!element.reported && requiresEndTag(element.name)) {
                     report(Rule.ELEMENT_CROSSES_BLOCK, element.location, barrier.location().file(), false,
                             "<" + element.name + "> is opened inside " + barrier.description() +
-                            " but not closed inside it: the page's structure then depends on which branch runs");
+                            " but not closed inside it: the page's structure then depends on which branch runs" +
+                            selfClosingHint(element.name));
                 }
                 element.reported = true;
                 stack.add(element);
@@ -1024,8 +1045,16 @@ final class JspPageAnalyzer {
         return state == State.IN_TAG || state == State.ATTR_VALUE;
     }
 
-    private static boolean requiresEndTag(String name) {
-        return !OPTIONAL_END_TAG.contains(name);
+    private boolean requiresEndTag(String name) {
+        return xml || !OPTIONAL_END_TAG.contains(name);
+    }
+
+    /**
+     * In XML, an HTML void element written HTML-style ({@code <br>}) is an unclosed element.
+     */
+    private String selfClosingHint(String name) {
+        return xml && VOID.contains(name.toLowerCase(Locale.ROOT)) ?
+                "; in XML markup write it as <" + name + "/>" : "";
     }
 
     private void advance(String printed) {

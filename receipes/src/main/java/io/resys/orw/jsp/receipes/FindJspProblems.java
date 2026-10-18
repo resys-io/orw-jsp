@@ -12,8 +12,10 @@ import org.openrewrite.ScanningRecipe;
 import org.openrewrite.TreeVisitor;
 
 import java.nio.file.Path;
-import java.util.HashSet;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -68,6 +70,15 @@ import java.util.Set;
  * {@code TAG_SPLIT_ACROSS_FILES}). Fragments - {@code .jspf}
  * files, and any file another page includes - are not reported for markup left open at their end
  * or closed without being opened in them, since their includers may legitimately do that.
+ * <p>
+ * Markup is checked as HTML or as XML ({@link MarkupMode}), as chosen by {@link #getMarkupMode()}.
+ * By default the page's {@code <%@ page contentType="..." %>} decides: an XML type such as
+ * {@code application/xhtml+xml} or {@code text/xml} means XML, anything else (including no
+ * {@code contentType}, which is {@code text/html}) means HTML. A fragment without its own
+ * {@code contentType} is XML if every page including it is. In XML, names are case-sensitive and
+ * every element must be closed or self-closed, so e.g. {@code <br>}, {@code <p>} without
+ * {@code </p>} and {@code <Div></div>} are reported, and {@code <script>} content is markup
+ * (use a CDATA section for raw text).
  */
 @Value
 @EqualsAndHashCode(callSuper = false)
@@ -104,11 +115,24 @@ public class FindJspProblems extends ScanningRecipe<FindJspProblems.Accumulator>
     @Nullable
     Boolean allowSplitBetweenIncludedFiles;
 
+    @Option(displayName = "Markup mode",
+            description = "Whether template text is checked as HTML or XML. `auto` (the default) uses " +
+                          "the page's `contentType`: XML for `text/xml`, `application/xml` and `+xml` types " +
+                          "such as `application/xhtml+xml`, otherwise HTML. A fragment without a " +
+                          "`contentType` of its own is XML if all pages including it are. In XML, every " +
+                          "element must be closed or self-closed (`<br/>`), names are case-sensitive, and " +
+                          "there are no optional end tags or raw-text elements.",
+            valid = {"auto", "html", "xml"},
+            example = "auto",
+            required = false)
+    @Nullable
+    String markupMode;
+
     public static class Accumulator {
         /**
-         * Every file some page statically includes.
+         * Every file some page statically includes, with the markup modes of the pages including it.
          */
-        final Set<Path> includedFiles = new HashSet<>();
+        final Map<Path, Set<MarkupMode>> includedFiles = new HashMap<>();
     }
 
     @Override
@@ -122,7 +146,10 @@ public class FindJspProblems extends ScanningRecipe<FindJspProblems.Accumulator>
             @Override
             public Jsp.Directive visitDirective(Jsp.Directive directive, ExecutionContext ctx) {
                 if (directive.getIncludedFile() != null) {
-                    acc.includedFiles.add(directive.getIncludedFile().getSourcePath());
+                    Jsp.Document page = getCursor().firstEnclosingOrThrow(Jsp.Document.class);
+                    MarkupMode declared = MarkupMode.declared(page);
+                    acc.includedFiles.computeIfAbsent(directive.getIncludedFile().getSourcePath(),
+                            p -> EnumSet.noneOf(MarkupMode.class)).add(declared == null ? MarkupMode.HTML : declared);
                 }
                 return super.visitDirective(directive, ctx);
             }
@@ -135,8 +162,8 @@ public class FindJspProblems extends ScanningRecipe<FindJspProblems.Accumulator>
             @Override
             public Jsp.Document visitDocument(Jsp.Document document, ExecutionContext ctx) {
                 Path path = document.getSourcePath();
-                boolean fragment = path.toString().endsWith(".jspf") || acc.includedFiles.contains(path);
-                JspPageAnalyzer analyzer = new JspPageAnalyzer(document, fragment,
+                boolean fragment = path.toString().endsWith(".jspf") || acc.includedFiles.containsKey(path);
+                JspPageAnalyzer analyzer = new JspPageAnalyzer(document, fragment, markupMode(document, acc),
                         maxScriptletLines == null ? DEFAULT_MAX_SCRIPTLET_LINES : maxScriptletLines,
                         Boolean.TRUE.equals(allowSplitBetweenIncludedFiles));
                 List<JspPageAnalyzer.Problem> found = analyzer.analyze(document);
@@ -147,5 +174,19 @@ public class FindJspProblems extends ScanningRecipe<FindJspProblems.Accumulator>
                 return analyzer.annotate(document);
             }
         };
+    }
+
+    private MarkupMode markupMode(Jsp.Document document, Accumulator acc) {
+        if ("html".equalsIgnoreCase(markupMode)) {
+            return MarkupMode.HTML;
+        } else if ("xml".equalsIgnoreCase(markupMode)) {
+            return MarkupMode.XML;
+        }
+        MarkupMode declared = MarkupMode.declared(document);
+        if (declared != null) {
+            return declared;
+        }
+        Set<MarkupMode> includers = acc.includedFiles.get(document.getSourcePath());
+        return includers != null && includers.equals(EnumSet.of(MarkupMode.XML)) ? MarkupMode.XML : MarkupMode.HTML;
     }
 }

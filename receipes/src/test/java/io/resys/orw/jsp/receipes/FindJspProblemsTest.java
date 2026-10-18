@@ -13,7 +13,7 @@ class FindJspProblemsTest implements RewriteTest {
 
     @Override
     public void defaults(RecipeSpec spec) {
-        spec.recipe(new FindJspProblems(null, null));
+        spec.recipe(new FindJspProblems(null, null, null));
     }
 
     @Test
@@ -286,7 +286,7 @@ class FindJspProblemsTest implements RewriteTest {
     @Test
     void largeScriptlet() {
         rewriteRun(
-                spec -> spec.recipe(new FindJspProblems(2, null)),
+                spec -> spec.recipe(new FindJspProblems(2, null, null)),
                 jsp(
                         """
                         <p>intro</p>
@@ -561,7 +561,7 @@ class FindJspProblemsTest implements RewriteTest {
     @Test
     void splitBetweenIncludedFilesCanBeAllowed() {
         rewriteRun(
-                spec -> spec.recipe(new FindJspProblems(null, true)),
+                spec -> spec.recipe(new FindJspProblems(null, true, null)),
                 jsp(
                         """
                         <%@ include file="header.jspf" %>
@@ -579,7 +579,7 @@ class FindJspProblemsTest implements RewriteTest {
     void allowedSplitStillReportsTagsInThePageMatchingAFragment() {
         // <div> header -> footer is allowed; <main> page -> footer and <section> header -> page are not.
         rewriteRun(
-                spec -> spec.recipe(new FindJspProblems(null, true)),
+                spec -> spec.recipe(new FindJspProblems(null, true, null)),
                 jsp(
                         """
                         <%@ include file="header.jspf" %>
@@ -715,6 +715,124 @@ class FindJspProblemsTest implements RewriteTest {
                         <c:forEach var="row" items="${rows}">${row}</c:forEach>
                         """,
                         spec -> spec.path("init.jspf")
+                )
+        );
+    }
+
+    @Test
+    void xmlContentTypeChecksMarkupAsXml() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="application/xhtml+xml; charset=UTF-8" %>
+                        <div>
+                        <p>one
+                        <br>
+                        <Span>x</span>
+                        </div>
+                        """,
+                        """
+                        <%@ page contentType="application/xhtml+xml; charset=UTF-8" %>
+                        <div>
+                        ~~(MISSING_END_TAG: <p> has no end tag (it is implicitly closed by </div> at line 6))~~><p>one
+                        ~~(MISSING_END_TAG: <br> has no end tag (it is implicitly closed by </div> at line 6); in XML markup write it as <br/>)~~><br>
+                        ~~(MISSING_END_TAG: <Span> has no end tag (it is implicitly closed by </div> at line 6))~~><Span>x~~(UNMATCHED_END_TAG: End tag </span> has no matching start tag)~~></span>
+                        </div>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void sameMarkupIsFineAsHtml() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="text/html; charset=UTF-8" %>
+                        <div>
+                        <p>one
+                        <br>
+                        <Span>x</span>
+                        </div>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void wellFormedXhtmlPageHasNoProblems() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="application/xhtml+xml" %>
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <!DOCTYPE html>
+                        <html xmlns="http://www.w3.org/1999/xhtml">
+                        <head>
+                            <meta charset="UTF-8"/>
+                            <script>//<![CDATA[
+                            if (a < b) { document.write("<div>"); }
+                            //]]></script>
+                        </head>
+                        <body>
+                        <p>first<br/>second</p>
+                        <svg:rect width="10"></svg:rect>
+                        <![CDATA[ <unclosed> ]]>
+                        </body>
+                        </html>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void scriptContentIsMarkupInXml() {
+        rewriteRun(
+                spec -> spec.recipe(new FindJspProblems(null, null, "xml")),
+                jsp(
+                        """
+                        <p>text</p>
+                        <script>document.write("<div>");</script>
+                        """,
+                        """
+                        <p>text</p>
+                        <script>document.write("~~(MISSING_END_TAG: <div> has no end tag (it is implicitly closed by </script> at line 2))~~><div>");</script>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void markupModeOptionOverridesContentType() {
+        rewriteRun(
+                spec -> spec.recipe(new FindJspProblems(null, null, "html")),
+                jsp(
+                        """
+                        <%@ page contentType="text/xml" %>
+                        <ul><li>one<li>two</ul>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void fragmentIncludedFromXmlPagesIsXml() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="application/xhtml+xml" %>
+                        <%@ include file="row.jspf" %>
+                        """,
+                        spec -> spec.path("index.jsp")
+                ),
+                jsp(
+                        """
+                        <div>a<br>b</div>
+                        """,
+                        """
+                        <div>a~~(MISSING_END_TAG: <br> has no end tag (it is implicitly closed by </div> at line 1); in XML markup write it as <br/>)~~><br>b</div>
+                        """,
+                        spec -> spec.path("row.jspf")
                 )
         );
     }

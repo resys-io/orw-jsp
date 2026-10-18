@@ -42,7 +42,7 @@ List<SourceFile> sources = JspParser.builder()
         .toList();
 
 // Analysis: FindJspProblems reports problems and changes nothing.
-RecipeRun analysis = new FindJspProblems(null, null).run(new InMemoryLargeSourceSet(sources), ctx);
+RecipeRun analysis = new FindJspProblems(null, null, null).run(new InMemoryLargeSourceSet(sources), ctx);
 List<JspProblems.Row> problems = analysis.getDataTableRows(JspProblems.class);
 for (JspProblems.Row problem : problems) {
     System.out.printf("%s:%d %s %s%n", problem.getFile(), problem.getLine(), problem.getRule(), problem.getMessage());
@@ -642,10 +642,30 @@ reports each problem in two ways:
 |---|---|---|---|
 | `maxScriptletLines` | `Integer` | `20` | Scriptlets and declarations with more non-blank lines than this are reported as `LARGE_SCRIPTLET`. |
 | `allowSplitBetweenIncludedFiles` | `Boolean` | `false` | Don't report an element whose start and end tags are in two different *included* files, e.g. `<div>` in `header.jspf` and `</div>` in `footer.jspf`. A split where one of the tags is in the page itself is still reported. |
+| `markupMode` | `String` | `auto` | `html`, `xml` or `auto`: whether template text is checked as HTML or XML (see [HTML and XML markup](#html-and-xml-markup)). |
 
 ```java
-new FindJspProblems(30, true)   // maxScriptletLines = 30, allowSplitBetweenIncludedFiles = true
+new FindJspProblems(30, true, null)   // maxScriptletLines = 30, allowSplitBetweenIncludedFiles = true
+new FindJspProblems(null, null, "xml") // check every page's markup as XML
 ```
+
+#### HTML and XML markup
+
+A JSP page can produce HTML or XML (XHTML served as `application/xhtml+xml`, an RSS feed, a SOAP
+response, …), and the markup rules differ. With `markupMode` `auto` (the default), the page's
+`<%@ page contentType="..." %>` decides, including one in a statically included file:
+`text/xml`, `application/xml` and any `+xml` type mean XML, and anything else means HTML. That
+includes no `contentType` at all, which JSP treats as `text/html`. A fragment with no
+`contentType` of its own is checked as XML if every page that includes it is XML.
+
+| | HTML | XML |
+|---|---|---|
+| Element names | Case-insensitive (`<DIV>…</div>` is fine) | Case-sensitive |
+| Void elements (`<br>`, `<img>`, …) | Need no end tag | Must be self-closed (`<br/>`) or closed |
+| Optional end tags (`<p>`, `<li>`, `<td>`, …) | May be omitted | Required |
+| `<script>`, `<style>`, `<textarea>`, `<title>` | Raw text, not checked for tags | Markup, so use `<![CDATA[ ]]>` for raw text |
+| `<![CDATA[ ]]>` | Not special | Raw text, not checked for tags |
+
 
 #### Rules
 
@@ -659,9 +679,10 @@ new FindJspProblems(30, true)   // maxScriptletLines = 30, allowSplitBetweenIncl
 | `ELEMENT_CROSSES_BLOCK` | An element opened inside a Java block or custom tag body and closed outside it, so the page's structure depends on which branch runs | `<% if (a) { %><div class="x"><% } else { %><div class="y"><% } %>…</div>` |
 | `TAG_SPLIT_ACROSS_FILES` | An element whose start and end tags are in different files, or one tag cut by an include | `<div>` in `header.jspf`, `</div>` in `footer.jspf`; `<div <%@ include file="attrs.jspf" %>>` |
 
-HTML elements whose end tag is optional (`<p>`, `<li>`, `<td>`, `<option>`, …) and void elements
-(`<br>`, `<img>`, …) are not reported as unclosed. Content inside `<script>`, `<style>` and HTML
-comments is not checked for tags.
+In HTML mode, elements whose end tag is optional (`<p>`, `<li>`, `<td>`, `<option>`, …) and void
+elements (`<br>`, `<img>`, …) are not reported as unclosed. Content inside `<script>`, `<style>`
+and HTML comments is not checked for tags. In XML mode every element must be closed (see
+[HTML and XML markup](#html-and-xml-markup)).
 
 **Readability**
 

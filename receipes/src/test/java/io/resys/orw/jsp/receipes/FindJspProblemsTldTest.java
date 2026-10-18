@@ -81,7 +81,7 @@ class FindJspProblemsTldTest implements RewriteTest {
 
     @Override
     public void defaults(RecipeSpec spec) {
-        spec.recipe(new FindJspProblems(null, null))
+        spec.recipe(new FindJspProblems(null, null, null))
                 .parser(JspParser.builder().taglib("http://example.com/app", tld));
     }
 
