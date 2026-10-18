@@ -836,4 +836,78 @@ class FindJspProblemsTest implements RewriteTest {
                 )
         );
     }
+
+    @Test
+    void selfClosingHtmlTags() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+                        <div class="spacer"/>
+                        <script src="a.js"/>
+                        <br/><img src="x.png" /><c:out value="${x}"/>
+                        <svg><rect width="10"/><path d="M0"/></svg><math/>
+                        """,
+                        """
+                        <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+                        ~~(SELF_CLOSING_HTML_TAG: <div/> is not self-closing in HTML: browsers ignore the "/" and treat it as a start tag, so what follows becomes its content; write <div></div>)~~><div class="spacer"/>
+                        ~~(SELF_CLOSING_HTML_TAG: <script/> is not self-closing in HTML: browsers ignore the "/" and treat it as a start tag, so what follows becomes its content; write <script></script>)~~><script src="a.js"/>
+                        <br/><img src="x.png" /><c:out value="${x}"/>
+                        <svg><rect width="10"/><path d="M0"/></svg><math/>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void selfClosingTagsAreFineInXml() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="application/xhtml+xml" %>
+                        <div class="spacer"/>
+                        <script src="a.js"/>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void voidElementsWithEndTags() {
+        rewriteRun(
+                jsp(
+                        """
+                        <p>a<br></br>b</p>
+                        <img src="x.png"></IMG>
+                        """,
+                        """
+                        <p>a<br>~~(VOID_ELEMENT_END_TAG: <br> is a void element and cannot have an end tag: remove </br> (browsers turn </br> into another <br>))~~></br>b</p>
+                        <img src="x.png">~~(VOID_ELEMENT_END_TAG: <img> is a void element and cannot have an end tag: remove </img> (browsers ignore it))~~></IMG>
+                        """
+                )
+        );
+    }
+
+    @Test
+    void voidElementEndTagReportedInFragments() {
+        rewriteRun(
+                jsp(
+                        "<input name=\"q\"></input>",
+                        "<input name=\"q\">~~(VOID_ELEMENT_END_TAG: <input> is a void element and cannot have an end tag: remove </input> (browsers ignore it))~~></input>",
+                        spec -> spec.path("parts/search.jspf")
+                )
+        );
+    }
+
+    @Test
+    void voidElementEndTagsAreFineInXml() {
+        rewriteRun(
+                jsp(
+                        """
+                        <%@ page contentType="application/xhtml+xml" %>
+                        <p>a<br></br>b</p>
+                        """
+                )
+        );
+    }
 }

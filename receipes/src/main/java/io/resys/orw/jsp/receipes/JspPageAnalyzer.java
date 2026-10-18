@@ -41,8 +41,10 @@ import static org.openrewrite.Tree.randomId;
  * depends on which branch runs ({@link Rule#ELEMENT_CROSSES_BLOCK}).
  * <p>
  * The tokenizer follows the page's {@link MarkupMode}. In {@link MarkupMode#HTML}, element names
- * are case-insensitive, void elements and elements with optional end tags may stay unclosed, and
- * {@code <script>}/{@code <style>}-like elements hold raw text. In {@link MarkupMode#XML}, names
+ * are case-insensitive, void elements and elements with optional end tags may stay unclosed,
+ * {@code <script>}/{@code <style>}-like elements hold raw text, and only void elements and SVG/MathML
+ * elements may use self-closing syntax ({@code <div/>} is reported; JSP actions are not HTML), and
+ * void elements may not have end tags ({@code </br>}). In {@link MarkupMode#XML}, names
  * are case-sensitive, every element must be closed or self-closed, and only CDATA sections hold
  * raw text.
  */
@@ -54,6 +56,8 @@ final class JspPageAnalyzer {
         ELEMENT_CROSSES_BLOCK(true),
         TAG_SPLIT_ACROSS_FILES(true),
         END_TAG_WITH_ATTRIBUTES(false),
+        SELF_CLOSING_HTML_TAG(false),
+        VOID_ELEMENT_END_TAG(false),
         SCRIPTLET_IN_HTML_TAG(false),
         GENERATED_ATTRIBUTE(false),
         HTML_IN_SCRIPTLET(false),
@@ -94,6 +98,11 @@ final class JspPageAnalyzer {
     private static final Set<String> VOID = Set.of(
             "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
             "source", "track", "wbr", "basefont", "frame", "isindex", "keygen", "command");
+
+    /**
+     * Elements that start foreign (SVG/MathML) content, where self-closing tags are allowed in HTML.
+     */
+    private static final Set<String> FOREIGN = Set.of("svg", "math");
 
     /**
      * Elements whose content is raw text, not markup, up to their own end tag, in HTML only.
@@ -884,9 +893,21 @@ final class JspPageAnalyzer {
                         "End tag </" + tagName + "> has attributes or other content, " +
                         (xml ? "which is not well-formed XML" : "which browsers ignore"));
             }
-            if (!closesRawText) {
+            if (!xml && VOID.contains(tagName)) {
+                // Not a balance problem: no context can make it right, so fragments report it too.
+                report(Rule.VOID_ELEMENT_END_TAG, location, null, false,
+                        "<" + tagName + "> is a void element and cannot have an end tag: remove </" + tagName + ">" +
+                        ("br".equals(tagName) ? " (browsers turn </br> into another <br>)" : " (browsers ignore it)"));
+            } else if (!closesRawText) {
                 closeElement(tagName, location);
             }
+        } else if (selfClosingSyntax && !xml && !VOID.contains(tagName) && !tagName.contains(":") &&
+                   !FOREIGN.contains(tagName) && !inForeignContent()) {
+            // Browsers ignore the "/" and open the element. Reported, then treated as closed so that
+            // the rest of the page isn't reported as its content too.
+            report(Rule.SELF_CLOSING_HTML_TAG, location, null, false,
+                    "<" + tagName + "/> is not self-closing in HTML: browsers ignore the \"/\" and treat it as a " +
+                    "start tag, so what follows becomes its content; write <" + tagName + "></" + tagName + ">");
         } else if (!xml && RAW_TEXT.contains(tagName)) {
             state = State.RAW_TEXT;
             rawTextElement = tagName;
@@ -1043,6 +1064,10 @@ final class JspPageAnalyzer {
 
     private boolean inHtmlTag() {
         return state == State.IN_TAG || state == State.ATTR_VALUE;
+    }
+
+    private boolean inForeignContent() {
+        return stack.stream().anyMatch(entry -> entry instanceof Element && FOREIGN.contains(((Element) entry).name));
     }
 
     private boolean requiresEndTag(String name) {

@@ -29,6 +29,13 @@ import java.util.Set;
  *     never closed (or is only implicitly closed by an enclosing element's end tag).</li>
  *     <li>{@code UNMATCHED_END_TAG} - an end tag with no start tag.</li>
  *     <li>{@code END_TAG_WITH_ATTRIBUTES} - e.g. {@code </div class="x">}.</li>
+ *     <li>{@code SELF_CLOSING_HTML_TAG} - in HTML markup, self-closing syntax on an element that is not
+ *     void ({@code <br/>} is fine) or SVG/MathML, e.g. {@code <div/>} or {@code <script src="x"/>}: browsers
+ *     ignore the {@code /} and open the element. JSP actions ({@code <c:out/>}) may self-close. Not
+ *     reported in XML markup, where self-closing is valid.</li>
+ *     <li>{@code VOID_ELEMENT_END_TAG} - in HTML markup, an end tag for a void element, e.g.
+ *     {@code <br></br>} or {@code <img src="x"></img>}. Reported in fragments too. Not reported in XML
+ *     markup, where {@code <br></br>} is well-formed.</li>
  *     <li>{@code SCRIPTLET_IN_HTML_TAG} - Java code or a custom tag with a body inside an HTML start
  *     tag, e.g. {@code <option <% if (sel) { %>selected<% } %>>}.</li>
  *     <li>{@code ELEMENT_CROSSES_BLOCK} - an HTML element opened inside a JSP action body or a Java

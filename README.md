@@ -661,7 +661,8 @@ includes no `contentType` at all, which JSP treats as `text/html`. A fragment wi
 | | HTML | XML |
 |---|---|---|
 | Element names | Case-insensitive (`<DIV>…</div>` is fine) | Case-sensitive |
-| Void elements (`<br>`, `<img>`, …) | Need no end tag | Must be self-closed (`<br/>`) or closed |
+| Void elements (`<br>`, `<img>`, …) | Cannot have an end tag (`VOID_ELEMENT_END_TAG`) | Must be self-closed (`<br/>`) or closed |
+| Self-closing syntax (`<div/>`) | Only on void elements (`<br/>`) and inside `<svg>`/`<math>`; otherwise `SELF_CLOSING_HTML_TAG` | Valid on any element |
 | Optional end tags (`<p>`, `<li>`, `<td>`, …) | May be omitted | Required |
 | `<script>`, `<style>`, `<textarea>`, `<title>` | Raw text, not checked for tags | Markup, so use `<![CDATA[ ]]>` for raw text |
 | `<![CDATA[ ]]>` | Not special | Raw text, not checked for tags |
@@ -676,6 +677,8 @@ includes no `contentType` at all, which JSP treats as `text/html`. A fragment wi
 | `MISSING_END_TAG` | An element whose end tag is required in HTML, or a custom tag, that is never closed or only closed implicitly by an outer end tag | `<div><span>text</div>` |
 | `UNMATCHED_END_TAG` | An end tag with no matching start tag | `</span>` with no `<span>` |
 | `END_TAG_WITH_ATTRIBUTES` | An end tag with attributes, which browsers ignore | `</div class="a">` |
+| `VOID_ELEMENT_END_TAG` | In HTML mode, an end tag for a void element. Browsers turn `</br>` into another `<br>` and ignore the others. Reported in fragments too. | `<br></br>`, `<img src="x.png"></img>` |
+| `SELF_CLOSING_HTML_TAG` | In HTML mode, self-closing syntax on an element that isn't void or SVG/MathML. Browsers ignore the `/` and open the element, so what follows becomes its content. JSP actions (`<c:out ... />`) may self-close. | `<div class="spacer"/>`, `<script src="a.js"/>` |
 | `ELEMENT_CROSSES_BLOCK` | An element opened inside a Java block or custom tag body and closed outside it, so the page's structure depends on which branch runs | `<% if (a) { %><div class="x"><% } else { %><div class="y"><% } %>…</div>` |
 | `TAG_SPLIT_ACROSS_FILES` | An element whose start and end tags are in different files, or one tag cut by an include | `<div>` in `header.jspf`, `</div>` in `footer.jspf`; `<div <%@ include file="attrs.jspf" %>>` |
 

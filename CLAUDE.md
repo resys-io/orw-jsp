@@ -326,7 +326,10 @@ decoded-getter/`*Source()`-raw-getter split `Properties.Entry` uses for line-con
   problem as a `SearchResult` marker plus a row in the `table.JspProblems` data table (with page,
   file, line, rule). The rules are listed in its Javadoc: tag balance (`MISSING_END_TAG`,
   `UNMATCHED_END_TAG`, `END_TAG_WITH_ATTRIBUTES`), Java or custom tags inside an HTML start tag
-  (`SCRIPTLET_IN_HTML_TAG`), and readability smells (`ELEMENT_CROSSES_BLOCK`, `GENERATED_ATTRIBUTE`,
+  (`SCRIPTLET_IN_HTML_TAG`), self-closing syntax on a non-void, non-SVG/MathML element in HTML mode
+  (`SELF_CLOSING_HTML_TAG`; JSP actions are `Jsp.Tag`s, never tokenized, so they may self-close), an
+  end tag for a void element in HTML mode (`VOID_ELEMENT_END_TAG`, not a balance rule, so fragments
+  report it too), and readability smells (`ELEMENT_CROSSES_BLOCK`, `GENERATED_ATTRIBUTE`,
   `HTML_IN_SCRIPTLET`, `LARGE_SCRIPTLET`, and `JSP_IN_HTML_COMMENT`, which fires when JSP code
   inside `<!-- -->` still runs and asks whether `<%-- --%>` was meant; it is reported once per
   comment and EL is deliberately exempt), and `VARIABLE_FROM_INCLUDE`, for a page that uses a Java
